@@ -94,6 +94,15 @@ def search_universe(query: str, limit: int = 8) -> list[UniverseEntry]:
     query_upper = query.upper()
     bare_query = query_upper.removesuffix(".NS").removesuffix(".BO")
 
+    # An explicit, well-formed BSE symbol (e.g. "SOMECO.BO") isn't in the bundled
+    # NSE-only snapshot, so it can't be found by the matching below -- surface it
+    # directly as a synthetic top result instead, so BSE tickers stay addable even
+    # without name search.
+    if query_upper.endswith(".BO") and is_supported_symbol(query_upper) and query_upper not in set(universe["symbol"]):
+        bse_entry = [UniverseEntry(symbol=query_upper, name=f"{bare_query} (BSE)", series="BO")]
+        remaining = search_universe(bare_query, limit=limit - 1) if limit > 1 else []
+        return bse_entry + [r for r in remaining if r.symbol != query_upper]
+
     symbol_bare = universe["symbol"].str.removesuffix(".NS")
     exact = universe[symbol_bare == bare_query]
     prefix_symbol = universe[symbol_bare.str.startswith(bare_query) & ~universe.index.isin(exact.index)]

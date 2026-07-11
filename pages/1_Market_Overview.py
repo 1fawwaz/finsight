@@ -5,23 +5,26 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core import theme
-from core.config import DEFAULT_TICKERS, UNSUPPORTED_MARKET_MESSAGE, get_logger, is_supported_symbol
 from core.data_ingestion import IngestionError, ingest_ticker
+from core.database import init_db
 from core.indicators import rsi
 from core.market_status import get_nse_market_status
 from core.queries import get_price_history, get_ticker_info
+from core.ui_components import display_symbol, stock_search_and_pick
+from core.watchlist import add_to_watchlist, list_watchlist, remove_from_watchlist, seed_default_watchlist_if_empty
+from core.config import get_logger
 
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="FinSight | Market Overview", page_icon="\U0001F4C8", layout="wide")
 st.title("Market Overview")
 
+init_db()
+seed_default_watchlist_if_empty()
+
 status = get_nse_market_status()
 status_color = "green" if status.is_open else "gray"
 st.caption(f":{status_color}[● {status.label}] · {status.current_time_ist.strftime('%d %b %Y, %H:%M')} IST")
-
-if "watchlist" not in st.session_state:
-    st.session_state.watchlist = list(DEFAULT_TICKERS)
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -50,41 +53,36 @@ def _rsi_badge(value: float | None) -> str:
     return f"{value:.0f} · Neutral"
 
 
+watchlist = list_watchlist()
+watchlist_symbols = [w["symbol"] for w in watchlist]
+
 col_add, col_remove = st.columns([2, 1])
 with col_add:
-    new_symbol = st.text_input("Add a ticker to your watchlist", placeholder="e.g. WIPRO.NS").strip().upper()
-    if st.button("Add") and new_symbol:
-        if not is_supported_symbol(new_symbol):
-            st.warning(UNSUPPORTED_MARKET_MESSAGE)
-        elif new_symbol in st.session_state.watchlist:
-            st.info(f"{new_symbol} is already in your watchlist.")
-        else:
-            info = _load_info(new_symbol)
-            if info is None:
-                with st.spinner(f"Fetching {new_symbol} from Yahoo Finance..."):
-                    try:
-                        ingest_ticker(new_symbol)
-                        _load_info.clear()
-                        _load_history.clear()
-                        st.session_state.watchlist.append(new_symbol)
-                        st.rerun()
-                    except IngestionError as exc:
-                        st.warning(f"Couldn't fetch {new_symbol}: {exc}")
-            else:
-                st.session_state.watchlist.append(new_symbol)
+    match = stock_search_and_pick("watchlist_add", label="Add a stock to your watchlist")
+    if match is not None and st.button(f"Add {display_symbol(match.symbol)}"):
+        with st.spinner(f"Fetching {display_symbol(match.symbol)} from Yahoo Finance..."):
+            try:
+                added, message = add_to_watchlist(match.symbol)
+                _load_history.clear()
+                _load_info.clear()
+                (st.success if added else st.info)(message)
+                st.session_state.pop("watchlist_add_query", None)
+                st.session_state.pop("watchlist_add_choice", None)
                 st.rerun()
+            except IngestionError as exc:
+                st.warning(f"Couldn't fetch {display_symbol(match.symbol)}: {exc}")
 
 with col_remove:
-    if st.session_state.watchlist:
-        to_remove = st.selectbox("Remove a ticker", options=[""] + st.session_state.watchlist)
+    if watchlist_symbols:
+        to_remove = st.selectbox("Remove a stock", options=[""] + watchlist_symbols, format_func=lambda s: display_symbol(s) if s else "")
         if to_remove and st.button("Remove"):
-            st.session_state.watchlist.remove(to_remove)
+            remove_from_watchlist(to_remove)
             st.rerun()
 
 st.divider()
 
 rows = []
-for symbol in st.session_state.watchlist:
+for symbol in watchlist_symbols:
     history = _load_history(symbol)
     if history.empty:
         continue
@@ -93,7 +91,7 @@ for symbol in st.session_state.watchlist:
     latest_rsi = rsi(close, window=14).iloc[-1] if len(close) >= 15 else None
     rows.append(
         {
-            "Symbol": symbol,
+            "Symbol": display_symbol(symbol),
             "Name": info.get("name") or symbol,
             "Sector": info.get("sector") or "Unknown",
             "Price": close.iloc[-1],

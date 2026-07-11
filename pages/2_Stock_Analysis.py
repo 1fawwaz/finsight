@@ -6,11 +6,12 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from core import theme
-from core.config import DEFAULT_TICKERS, UNSUPPORTED_MARKET_MESSAGE, get_logger, is_supported_symbol
+from core.config import DEFAULT_TICKERS, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
 from core.formatting import format_inr
 from core.indicators import bollinger_bands, ema, macd, rsi, sma, volatility
-from core.queries import get_price_history, list_ticker_symbols
+from core.queries import get_price_history
+from core.ui_components import stock_picker
 
 logger = get_logger(__name__)
 
@@ -25,23 +26,12 @@ def _load_history(symbol: str) -> pd.DataFrame:
     return get_price_history(symbol)
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def _available_symbols() -> list[str]:
-    symbols = list_ticker_symbols()
-    return symbols or list(DEFAULT_TICKERS)
-
-
 col_symbol, col_range = st.columns([2, 3])
 with col_symbol:
-    typed = st.text_input("Ticker symbol", placeholder="e.g. RELIANCE.NS").strip().upper()
-    symbol = typed if typed else st.selectbox("...or pick from the database", _available_symbols())
+    symbol = stock_picker("stock_analysis_symbol", default_symbol=DEFAULT_TICKERS[0])
 
 with col_range:
     range_label = st.radio("Range", options=list(RANGE_OPTIONS.keys()), index=3, horizontal=True)
-
-if not is_supported_symbol(symbol):
-    st.warning(UNSUPPORTED_MARKET_MESSAGE)
-    st.stop()
 
 history = _load_history(symbol)
 

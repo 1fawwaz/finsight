@@ -96,12 +96,18 @@ def upsert_prices(session, ticker: Ticker, history: pd.DataFrame) -> int:
 
 
 def ingest_ticker(symbol: str, period: str = HISTORY_PERIOD) -> int:
-    """Fetch and idempotently store price history for a single ticker. Returns rows inserted."""
+    """Fetch and idempotently store price history for a single ticker. Returns rows inserted.
+
+    `symbol` is resolved to its canonical `.NS`/`.BO` form (name, bare ticker, or full
+    symbol all accepted) once via `get_or_create_ticker`, and that canonical symbol --
+    not the raw input -- is what's used to fetch history, so e.g. passing "reliance"
+    fetches RELIANCE.NS rather than asking yfinance for the literal string "reliance".
+    """
     with get_session() as session:
         ticker = get_or_create_ticker(session, symbol)
-        history = fetch_price_history(symbol, period=period)
+        history = fetch_price_history(ticker.symbol, period=period)
         inserted = upsert_prices(session, ticker, history)
-        logger.info("%s: inserted %d new price rows", symbol, inserted)
+        logger.info("%s: inserted %d new price rows", ticker.symbol, inserted)
         return inserted
 
 

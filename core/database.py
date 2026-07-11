@@ -114,6 +114,23 @@ class Prediction(Base):
     ticker: Mapped["Ticker"] = relationship(back_populates="predictions")
 
 
+class Watchlist(Base):
+    """A ticker the user is tracking on the Market Overview page.
+
+    Persisted in the DB (rather than session state) so it survives restarts and is
+    shared consistently across the whole app, the same way portfolio holdings are.
+    """
+
+    __tablename__ = "watchlist"
+    __table_args__ = (UniqueConstraint("ticker_id", name="uq_watchlist_ticker"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), nullable=False, index=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    ticker: Mapped["Ticker"] = relationship()
+
+
 class Portfolio(Base):
     """A named collection of holdings."""
 

@@ -6,11 +6,12 @@ import streamlit as st
 
 from core import theme
 from core.backtester import walk_forward_backtest
-from core.config import DEFAULT_TICKERS, UNSUPPORTED_MARKET_MESSAGE, get_logger, is_supported_symbol
+from core.config import DEFAULT_TICKERS, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
 from core.ml_model import make_dataset
-from core.queries import get_price_history, list_ticker_symbols
+from core.queries import get_price_history
 from core.sentiment import get_stored_sentiment
+from core.ui_components import stock_picker
 
 logger = get_logger(__name__)
 
@@ -22,12 +23,6 @@ st.warning(
     "typically lands around **52-58% accuracy** — barely better than a coin flip. Treat every "
     "number on this page as a research signal, not a recommendation to trade."
 )
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def _available_symbols() -> list[str]:
-    symbols = list_ticker_symbols()
-    return symbols or list(DEFAULT_TICKERS)
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -53,12 +48,7 @@ def _run_backtest(symbol: str, train_window: int, test_window: int):
     return walk_forward_backtest(features, labels, history["close"], train_window=train_window, test_window=test_window)
 
 
-typed = st.text_input("Ticker symbol", placeholder="e.g. RELIANCE.NS").strip().upper()
-symbol = typed if typed else st.selectbox("...or pick from the database", _available_symbols())
-
-if not is_supported_symbol(symbol):
-    st.warning(UNSUPPORTED_MARKET_MESSAGE)
-    st.stop()
+symbol = stock_picker("ml_signals_symbol", default_symbol=DEFAULT_TICKERS[0])
 
 if _load_history(symbol).empty:
     with st.spinner(f"Fetching {symbol} from Yahoo Finance..."):

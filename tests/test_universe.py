@@ -53,6 +53,18 @@ def test_search_universe_multiword_typo_finds_closest_match():
     assert results[0].symbol == "HDFCBANK.NS"
 
 
+def test_search_universe_explicit_bse_symbol_is_addable_even_outside_nse_snapshot():
+    results = search_universe("SOMEBSEONLY.BO", limit=5)
+    assert results[0].symbol == "SOMEBSEONLY.BO"
+
+
+def test_search_universe_bse_symbol_of_known_nse_company_still_surfaces_nse_match_too():
+    results = search_universe("RELIANCE.BO", limit=5)
+    symbols = [r.symbol for r in results]
+    assert symbols[0] == "RELIANCE.BO"
+    assert "RELIANCE.NS" in symbols
+
+
 def test_search_universe_rejects_short_bare_symbol_guess_like_us_tickers():
     # "AAPL"/"SPY" are exactly the shape of a deliberate (unsupported) US-ticker
     # guess -- short, single-token, all-alphabetic -- and must not fuzzy-match into

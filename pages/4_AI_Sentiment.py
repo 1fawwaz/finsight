@@ -5,10 +5,11 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core import theme
-from core.config import DEFAULT_TICKERS, GEMINI_API_KEY, UNSUPPORTED_MARKET_MESSAGE, get_logger, is_supported_symbol
+from core.config import DEFAULT_TICKERS, GEMINI_API_KEY, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
-from core.queries import get_price_history, list_ticker_symbols
+from core.queries import get_price_history
 from core.sentiment import analyze_ticker_sentiment, get_stored_sentiment
+from core.ui_components import stock_picker
 
 logger = get_logger(__name__)
 
@@ -22,12 +23,6 @@ if not GEMINI_API_KEY:
     )
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def _available_symbols() -> list[str]:
-    symbols = list_ticker_symbols()
-    return symbols or list(DEFAULT_TICKERS)
-
-
 @st.cache_data(ttl=900, show_spinner=False)
 def _load_history(symbol: str) -> pd.DataFrame:
     return get_price_history(symbol)
@@ -35,12 +30,7 @@ def _load_history(symbol: str) -> pd.DataFrame:
 
 col_symbol, col_action = st.columns([2, 1])
 with col_symbol:
-    typed = st.text_input("Ticker symbol", placeholder="e.g. RELIANCE.NS").strip().upper()
-    symbol = typed if typed else st.selectbox("...or pick from the database", _available_symbols())
-
-if not is_supported_symbol(symbol):
-    st.warning(UNSUPPORTED_MARKET_MESSAGE)
-    st.stop()
+    symbol = stock_picker("sentiment_symbol", default_symbol=DEFAULT_TICKERS[0])
 
 if _load_history(symbol).empty:
     with st.spinner(f"Fetching {symbol} from Yahoo Finance..."):

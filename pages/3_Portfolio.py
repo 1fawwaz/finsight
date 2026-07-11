@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core import theme
-from core.config import BENCHMARKS, UNSUPPORTED_MARKET_MESSAGE, get_logger, is_supported_symbol
+from core.config import BENCHMARKS, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
 from core.formatting import format_inr
 from core.portfolio import (
@@ -21,6 +21,7 @@ from core.portfolio import (
     sharpe_ratio,
 )
 from core.queries import get_multi_symbol_close, get_price_history
+from core.ui_components import display_symbol, stock_search_and_pick
 
 logger = get_logger(__name__)
 
@@ -75,20 +76,21 @@ portfolio_id = portfolio_names[selected_name]
 st.divider()
 st.subheader("Holdings")
 
-with st.form("add_holding_form", clear_on_submit=True):
-    form_cols = st.columns([2, 1, 1, 1])
-    symbol_input = form_cols[0].text_input("Symbol", placeholder="e.g. WIPRO.NS").strip().upper()
-    shares_input = form_cols[1].number_input("Shares", min_value=0.0, step=1.0)
-    cost_input = form_cols[2].number_input("Avg cost (₹)", min_value=0.0, step=0.01)
-    submitted = form_cols[3].form_submit_button("Add Holding")
-    if submitted:
-        if not symbol_input or shares_input <= 0:
-            st.warning("Enter a symbol and a positive share count.")
-        elif not is_supported_symbol(symbol_input):
-            st.warning(UNSUPPORTED_MARKET_MESSAGE)
-        elif _ensure_ingested(symbol_input):
-            add_holding(portfolio_id, symbol_input, shares_input, cost_input)
-            st.rerun()
+match = stock_search_and_pick("add_holding", label="Search for a stock to add")
+form_cols = st.columns([1, 1, 1])
+shares_input = form_cols[0].number_input("Shares", min_value=0.0, step=1.0, key="add_holding_shares")
+cost_input = form_cols[1].number_input("Avg cost (₹)", min_value=0.0, step=0.01, key="add_holding_cost")
+form_cols[2].write("")
+form_cols[2].write("")
+add_clicked = form_cols[2].button(f"Add {display_symbol(match.symbol)}" if match else "Add Holding", disabled=match is None)
+if add_clicked and match is not None:
+    if shares_input <= 0:
+        st.warning("Enter a positive share count.")
+    elif _ensure_ingested(match.symbol):
+        add_holding(portfolio_id, match.symbol, shares_input, cost_input)
+        for widget_key in ("add_holding_query", "add_holding_choice", "add_holding_shares", "add_holding_cost"):
+            st.session_state.pop(widget_key, None)
+        st.rerun()
 
 holdings = list_holdings(portfolio_id)
 
@@ -109,7 +111,7 @@ for h in holdings:
     holdings_rows.append(
         {
             "id": h["id"],
-            "Symbol": h["symbol"],
+            "Symbol": display_symbol(h["symbol"]),
             "Shares": h["shares"],
             "Avg Cost": h["avg_cost"],
             "Current Price": price,
