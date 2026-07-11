@@ -41,6 +41,11 @@ class UniverseEntry:
     series: str
 
 
+def display_symbol(symbol: str) -> str:
+    """Symbol without its exchange suffix, for compact display (RELIANCE, not RELIANCE.NS)."""
+    return symbol.removesuffix(".NS").removesuffix(".BO")
+
+
 def _clean_name(name: str) -> str:
     """Strip generic corporate suffixes ("Limited", "Ltd", ...) so fuzzy scoring
     compares the distinctive part of a company name rather than boilerplate."""

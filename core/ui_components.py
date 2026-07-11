@@ -10,16 +10,11 @@ import streamlit as st
 
 from core.ai_explain import generate_ai_panel
 from core.explain import Explanation, PREDICTION_DISCLAIMER
-from core.universe import UniverseEntry, search_universe
+from core.universe import UniverseEntry, display_symbol, search_universe
 
 SEARCH_PLACEHOLDER = "e.g. Reliance, TCS, INFY, HDFC Bank..."
 
 MOOD_ICON = {"good": "\U0001F7E2", "worried": "\U0001F534", "neutral": "⚪"}
-
-
-def display_symbol(symbol: str) -> str:
-    """Symbol without its exchange suffix, for compact display (RELIANCE, not RELIANCE.NS)."""
-    return symbol.removesuffix(".NS").removesuffix(".BO")
 
 
 def _match_labels(matches: list[UniverseEntry]) -> list[str]:
