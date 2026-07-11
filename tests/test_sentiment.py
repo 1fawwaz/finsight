@@ -1,6 +1,7 @@
 """Tests for core.sentiment: fallback scoring, Gemini fallback-on-error, news parsing, idempotent storage."""
 
 import pytest
+from sqlalchemy import select
 
 from core.database import Ticker, get_session
 from core.sentiment import (
@@ -128,3 +129,50 @@ def test_analyze_ticker_sentiment_unknown_symbol_returns_empty(temp_db, monkeypa
         NewsArticle("H", "S", datetime.now(timezone.utc), "Src", "https://x")
     ])
     assert analyze_ticker_sentiment("NOPE.NS") == []
+
+
+def test_analyze_ticker_sentiment_upsert_survives_a_race(temp_db, monkeypatch):
+    """A genuine race: a row for this exact (ticker, headline) gets inserted by another
+    caller *after* the in-memory pre-check but *before* this call's own insert. The DB-level
+    ON CONFLICT DO NOTHING must absorb that without raising IntegrityError or duplicating."""
+    with get_session() as session:
+        session.add(Ticker(symbol="RELIANCE.NS", name="Reliance Industries Ltd.", sector="Energy"))
+
+    article = NewsArticle(
+        headline="Company beats estimates",
+        summary="Profit surges",
+        published_at=datetime(2026, 6, 22, tzinfo=timezone.utc),
+        source="Example News",
+        url="https://example.com/a",
+    )
+    monkeypatch.setattr("core.sentiment.fetch_news", lambda symbol, limit=10: [article])
+    monkeypatch.setattr("core.sentiment.GEMINI_API_KEY", "")
+
+    from core.database import NewsSentiment
+
+    def _score_then_simulate_concurrent_insert(text):
+        # Simulate another process/session inserting the same (ticker, headline) row
+        # in between this call's pre-check and its own insert.
+        with get_session() as session:
+            ticker = session.execute(select(Ticker).where(Ticker.symbol == "RELIANCE.NS")).scalar_one()
+            session.add(
+                NewsSentiment(
+                    ticker_id=ticker.id,
+                    date=article.published_at.date(),
+                    headline=article.headline,
+                    sentiment=0.5,
+                    confidence=0.5,
+                    summary="inserted concurrently",
+                    source="Other",
+                )
+            )
+        return rule_based_sentiment(text)
+
+    monkeypatch.setattr("core.sentiment.score_sentiment", lambda text: (_score_then_simulate_concurrent_insert(text), False))
+
+    new_rows = analyze_ticker_sentiment("RELIANCE.NS")  # must not raise IntegrityError
+
+    assert new_rows == []  # the concurrent insert won the race; this call found 0 new rows
+    stored = get_stored_sentiment("RELIANCE.NS")
+    assert len(stored) == 1
+    assert stored[0]["summary"] == "inserted concurrently"

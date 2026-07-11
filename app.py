@@ -138,14 +138,23 @@ if watchlist_rows:
         top_gainer = (str(best["Symbol"]), float(best["1D %"]))
         top_loser = (str(worst["Symbol"]), float(worst["1D %"]))
 
-snapshot = MarketSnapshot(
-    nifty_pct=index_pcts.get(BENCHMARK_NIFTY50),
-    sensex_pct=index_pcts.get(BENCHMARK_SENSEX),
-    banknifty_pct=index_pcts.get(BENCHMARK_BANKNIFTY),
-    top_gainer=top_gainer,
-    top_loser=top_loser,
+@st.cache_data(ttl=1800, show_spinner=False)
+def _cached_market_summary(
+    nifty_pct: float | None,
+    sensex_pct: float | None,
+    banknifty_pct: float | None,
+    top_gainer: tuple[str, float] | None,
+    top_loser: tuple[str, float] | None,
+) -> tuple[str, bool]:
+    snapshot = MarketSnapshot(
+        nifty_pct=nifty_pct, sensex_pct=sensex_pct, banknifty_pct=banknifty_pct, top_gainer=top_gainer, top_loser=top_loser
+    )
+    return summarize_market(snapshot)
+
+
+summary_text, used_gemini = _cached_market_summary(
+    index_pcts.get(BENCHMARK_NIFTY50), index_pcts.get(BENCHMARK_SENSEX), index_pcts.get(BENCHMARK_BANKNIFTY), top_gainer, top_loser
 )
-summary_text, used_gemini = summarize_market(snapshot)
 st.info(summary_text)
 if not used_gemini and mode == "Professional":
     st.caption("Rule-based summary -- Gemini unavailable or not configured.")

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 import yfinance as yf
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from core.config import GEMINI_API_KEY, get_logger
 from core.database import NewsSentiment, Ticker, get_session
@@ -133,7 +134,14 @@ def score_sentiment(text: str) -> tuple[SentimentResult, bool]:
 
 
 def analyze_ticker_sentiment(symbol: str, limit: int = 10) -> list[dict]:
-    """Fetch recent news for a symbol, score it, and idempotently store new rows. Returns newly stored rows."""
+    """Fetch recent news for a symbol, score it, and idempotently store new rows. Returns newly stored rows.
+
+    Headlines already stored are skipped *before* scoring (not just before the write),
+    so a re-click never re-spends a Gemini call on a headline it's already scored. The
+    write itself is a real SQLite UPSERT (INSERT ... ON CONFLICT DO NOTHING on the
+    (ticker_id, headline) unique constraint) rather than a bare insert, so even a race
+    between two concurrent calls can't produce a duplicate row.
+    """
     articles = fetch_news(symbol, limit=limit)
     if not articles:
         return []
@@ -155,8 +163,9 @@ def analyze_ticker_sentiment(symbol: str, limit: int = 10) -> list[dict]:
                 continue
             text = f"{article.headline}. {article.summary}".strip()
             result, _used_gemini = score_sentiment(text)
-            session.add(
-                NewsSentiment(
+            insert_result = session.execute(
+                sqlite_insert(NewsSentiment)
+                .values(
                     ticker_id=ticker.id,
                     date=article.published_at.date(),
                     headline=article.headline,
@@ -165,8 +174,11 @@ def analyze_ticker_sentiment(symbol: str, limit: int = 10) -> list[dict]:
                     summary=result.rationale,
                     source=article.source,
                 )
+                .on_conflict_do_nothing(index_elements=["ticker_id", "headline"])
             )
             existing_headlines.add(article.headline)
+            if insert_result.rowcount == 0:
+                continue  # a concurrent call already inserted this headline
             new_rows.append(
                 {
                     "date": article.published_at.date(),
