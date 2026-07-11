@@ -22,7 +22,7 @@ from core.explain import (
 from core.formatting import format_inr
 from core.indicators import adx, atr, bollinger_bands, ema, macd, rsi, sma, support_resistance, volatility, vwap
 from core.queries import get_price_history
-from core.ui_components import render_explanation, render_mode_toggle, stock_picker
+from core.ui_components import render_ai_panel, render_explanation, render_mode_toggle, stock_picker
 
 logger = get_logger(__name__)
 
@@ -258,6 +258,22 @@ if show_support_resistance:
 
 for explanation in explanations:
     render_explanation(explanation, mode)
+
+st.divider()
+ai_panel_data = {
+    "symbol": symbol,
+    "last_close": round(float(last_close), 2),
+    "rsi_14": round(float(latest_rsi_value), 1) if pd.notna(latest_rsi_value) else None,
+    "macd": round(float(macd_latest["macd"]), 2) if macd_latest is not None and pd.notna(macd_latest["macd"]) else None,
+    "macd_signal": round(float(macd_latest["signal"]), 2) if macd_latest is not None and pd.notna(macd_latest["signal"]) else None,
+    "volatility_annualized": round(float(latest_vol), 3) if latest_vol is not None else None,
+    "atr_14": round(float(latest_atr), 2) if latest_atr is not None else None,
+    "adx_14": round(float(latest_adx), 1) if latest_adx is not None else None,
+    "52w_high": round(float(last_year.max()), 2),
+    "52w_low": round(float(last_year.min()), 2),
+}
+ai_fallback = " ".join((e.simple if mode == "Simple" else e.professional) for e in explanations)
+render_ai_panel(f"Technical analysis for {symbol}", ai_panel_data, ai_fallback, mode)
 
 st.divider()
 st.caption("FinSight is a signal-research and education tool. Nothing shown here is financial advice.")

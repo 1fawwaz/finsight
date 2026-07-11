@@ -10,7 +10,7 @@ from core.data_ingestion import IngestionError, ingest_ticker
 from core.explain import explain_sentiment
 from core.queries import get_price_history
 from core.sentiment import analyze_ticker_sentiment, get_stored_sentiment
-from core.ui_components import render_explanation, render_mode_toggle, stock_picker
+from core.ui_components import render_ai_panel, render_explanation, render_mode_toggle, stock_picker
 
 logger = get_logger(__name__)
 
@@ -101,6 +101,17 @@ else:
             badge_cols[0].metric("Sentiment", f"{row['sentiment']:+.2f}", sentiment_label)
             badge_cols[1].metric("Confidence", f"{row['confidence']:.0%}")
             badge_cols[2].write(row["summary"])
+
+    st.divider()
+    sentiment_ai_data = {
+        "symbol": symbol,
+        "num_articles": len(stored),
+        "mean_sentiment": round(float(sentiment_df["sentiment"].mean()), 2),
+        "positive_count": int((sentiment_df["sentiment"] > 0.1).sum()),
+        "negative_count": int((sentiment_df["sentiment"] < -0.1).sum()),
+        "recent_headlines": [r["headline"] for r in sorted(stored, key=lambda r: r["date"], reverse=True)[:5]],
+    }
+    render_ai_panel(f"News sentiment for {symbol}", sentiment_ai_data, overall.simple if mode == "Simple" else overall.professional, mode)
 
 st.divider()
 st.caption("FinSight is a signal-research and education tool. Nothing shown here is financial advice.")

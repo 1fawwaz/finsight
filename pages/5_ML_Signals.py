@@ -12,7 +12,7 @@ from core.explain import explain_ml_prediction
 from core.ml_model import make_dataset, predict_next_direction
 from core.queries import get_price_history
 from core.sentiment import get_stored_sentiment
-from core.ui_components import render_explanation, render_mode_toggle, render_prediction_disclaimer, stock_picker
+from core.ui_components import render_ai_panel, render_explanation, render_mode_toggle, render_prediction_disclaimer, stock_picker
 
 logger = get_logger(__name__)
 
@@ -173,6 +173,27 @@ with col_equity:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
+ml_ai_data = {
+    "symbol": symbol,
+    "accuracy": round(float(result.accuracy), 3),
+    "precision": round(float(result.precision), 3),
+    "recall": round(float(result.recall), 3),
+    "out_of_sample_days": len(result.predictions),
+}
+if next_prediction is not None:
+    ml_ai_data["next_day_predicted_direction"] = "up" if next_prediction[0] else "down"
+    ml_ai_data["next_day_probability_up"] = round(float(next_prediction[1]), 3)
+ml_fallback = (
+    f"Out of every 10 guesses this computer made in the past, about {round(result.accuracy * 10)} were right. "
+    "That's only a little better than flipping a coin -- so treat it as a hint, not a promise."
+    if mode == "Simple"
+    else f"Walk-forward accuracy {result.accuracy:.1%}, precision {result.precision:.1%}, recall {result.recall:.1%} "
+    f"over {len(result.predictions)} out-of-sample days -- consistent with the ~52-58% ceiling typical of daily "
+    "equity direction classifiers."
+)
+render_ai_panel(f"ML direction-classifier results for {symbol}", ml_ai_data, ml_fallback, mode)
 
 st.divider()
 st.caption("FinSight is a signal-research and education tool. Nothing shown here is financial advice.")

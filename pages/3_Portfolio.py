@@ -22,7 +22,7 @@ from core.portfolio import (
     sharpe_ratio,
 )
 from core.queries import get_multi_symbol_close, get_price_history
-from core.ui_components import display_symbol, render_explanation, render_mode_toggle, stock_search_and_pick
+from core.ui_components import display_symbol, render_ai_panel, render_explanation, render_mode_toggle, stock_search_and_pick
 
 logger = get_logger(__name__)
 
@@ -170,6 +170,8 @@ with col_alloc:
 
 price_df = get_multi_symbol_close(valid_symbols)
 
+sharpe = None
+drawdown = None
 with col_metrics:
     st.subheader("Risk Metrics")
     if len(price_df) < 2:
@@ -229,6 +231,22 @@ if len(valid_symbols) >= 2 and len(price_df) >= 2:
     )
     theme.apply_dark_layout(fig, margin=dict(t=10, l=10, r=10, b=10), height=400)
     st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
+portfolio_ai_data = {
+    "portfolio_name": selected_name,
+    "num_holdings": len(holdings),
+    "holdings": {display_symbol(h["symbol"]): round(weights.get(h["symbol"], 0.0), 3) for h in holdings if h["symbol"] in weights},
+    "sharpe_ratio": round(float(sharpe), 2) if sharpe is not None else None,
+    "max_drawdown": round(float(drawdown), 3) if drawdown is not None else None,
+}
+portfolio_fallback_bits = []
+if sharpe is not None:
+    portfolio_fallback_bits.append((explain_sharpe(sharpe).simple if mode == "Simple" else explain_sharpe(sharpe).professional))
+if drawdown is not None:
+    portfolio_fallback_bits.append((explain_drawdown(drawdown).simple if mode == "Simple" else explain_drawdown(drawdown).professional))
+portfolio_fallback = " ".join(portfolio_fallback_bits) or "Add holdings with enough price history to see a risk summary here."
+render_ai_panel(f"Portfolio review for '{selected_name}'", portfolio_ai_data, portfolio_fallback, mode)
 
 st.divider()
 st.caption("FinSight is a signal-research and education tool. Nothing shown here is financial advice.")

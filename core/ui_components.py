@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from core.ai_explain import generate_ai_panel
 from core.explain import Explanation, PREDICTION_DISCLAIMER
 from core.universe import UniverseEntry, search_universe
 
@@ -127,3 +128,24 @@ def render_explanation(explanation: Explanation, mode: str) -> None:
 def render_prediction_disclaimer() -> None:
     """Persistent, unmissable disclaimer for any panel showing an AI/ML prediction."""
     st.warning(f"⚠️ {PREDICTION_DISCLAIMER}")
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _cached_ai_panel(context_label: str, data_key: tuple, fallback_text: str, mode: str) -> tuple[str, bool]:
+    return generate_ai_panel(context_label, dict(data_key), fallback_text, mode)
+
+
+def render_ai_panel(context_label: str, data: dict, fallback_text: str, mode: str) -> None:
+    """The shared "AI Analysis" panel for every analytical page: a Gemini-narrated
+    synthesis of that page's own already-computed numbers (never invented), with a
+    rule-based fallback if Gemini is unavailable or fails.
+
+    Cached per (context_label, data, mode) so switching tabs, toggling a checkbox, or
+    any other same-page rerun doesn't re-call Gemini for numbers it already explained.
+    """
+    st.subheader("What the AI Thinks" if mode == MODE_SIMPLE else "AI Analysis")
+    data_key = tuple(sorted(data.items()))
+    text, used_gemini = _cached_ai_panel(context_label, data_key, fallback_text, mode)
+    st.info(text)
+    if not used_gemini and mode == MODE_PROFESSIONAL:
+        st.caption("Rule-based summary -- Gemini unavailable or not configured.")
