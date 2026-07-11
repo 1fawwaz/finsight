@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from core.config import DEFAULT_TICKERS, HISTORY_PERIOD, UNSUPPORTED_MARKET_MESSAGE, get_logger, is_supported_symbol
 from core.database import Price, Ticker, get_session, init_db
+from core.universe import resolve_symbol
 
 logger = get_logger(__name__)
 
@@ -20,8 +21,14 @@ class IngestionError(Exception):
 
 
 def get_or_create_ticker(session, symbol: str) -> Ticker:
-    """Fetch an existing Ticker row by symbol or create one, filling name/sector from yfinance."""
-    symbol = symbol.upper().strip()
+    """Fetch an existing Ticker row by symbol or create one, filling name/sector from yfinance.
+
+    `symbol` may be a company name, bare ticker, or full `.NS`/`.BO` symbol -- it is
+    resolved to a canonical symbol via `core.universe.resolve_symbol` first, so callers
+    never need to know or type the exchange suffix themselves.
+    """
+    resolved = resolve_symbol(symbol.strip())
+    symbol = (resolved or symbol).upper().strip()
     if not is_supported_symbol(symbol):
         raise IngestionError(UNSUPPORTED_MARKET_MESSAGE)
     ticker = session.execute(select(Ticker).where(Ticker.symbol == symbol)).scalar_one_or_none()

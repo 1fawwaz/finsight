@@ -2,7 +2,7 @@ venv/
 __pycache__/
 *.pyc
 .env
-data/
+/data/
 .git/
 .pytest_cache/
 .coverage

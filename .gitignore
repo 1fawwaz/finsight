@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 .env
 .env.backup
-data/
+/data/
 .pytest_cache/
 .coverage
 htmlcov/
