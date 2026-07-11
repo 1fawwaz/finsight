@@ -128,12 +128,12 @@ if show_ema:
 if show_bollinger:
     bands = bollinger_bands(full_close, window=20, num_std=2.0).reindex(visible.index)
     fig.add_trace(
-        go.Scatter(x=visible.index, y=bands["upper"], name="Bollinger Upper", line=dict(color=theme.INK_MUTED, width=1, dash="dot")),
+        go.Scatter(x=visible.index, y=bands["upper"], name="Bollinger Upper", line=dict(color=theme.DARK_INK_MUTED, width=1, dash="dot")),
         row=1,
         col=1,
     )
     fig.add_trace(
-        go.Scatter(x=visible.index, y=bands["lower"], name="Bollinger Lower", line=dict(color=theme.INK_MUTED, width=1, dash="dot"), fill="tonexty", fillcolor="rgba(137,135,129,0.08)"),
+        go.Scatter(x=visible.index, y=bands["lower"], name="Bollinger Lower", line=dict(color=theme.DARK_INK_MUTED, width=1, dash="dot"), fill="tonexty", fillcolor="rgba(125,130,144,0.12)"),
         row=1,
         col=1,
     )
@@ -193,11 +193,11 @@ fig.add_trace(
     col=1,
 )
 
-fig.update_layout(
+theme.apply_dark_layout(
+    fig,
     height=900,
     xaxis4_rangeslider_visible=False,
     xaxis_rangeslider_visible=False,
-    plot_bgcolor="white",
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     margin=dict(t=40, l=10, r=10, b=10),
 )

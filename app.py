@@ -1,32 +1,176 @@
-"""FinSight entrypoint: landing page and shared footer disclaimer."""
+"""FinSight entrypoint: a trading-terminal-style home dashboard.
 
+Market status, portfolio value, watchlist, top movers, an AI market summary, recent
+searches, and a quick search box -- everything a returning user needs at a glance.
+"""
+
+import pandas as pd
 import streamlit as st
 
+from core.config import BENCHMARK_BANKNIFTY, BENCHMARK_NIFTY50, BENCHMARK_SENSEX, get_logger
+from core.data_ingestion import IngestionError, ingest_ticker
 from core.database import init_db
-from core.ui_components import render_mode_toggle
+from core.formatting import format_inr
+from core.market_status import get_nse_market_status
+from core.market_summary import MarketSnapshot, summarize_market
+from core.portfolio import list_holdings, list_portfolios
+from core.queries import get_price_history
+from core.ui_components import RECENT_SEARCHES_KEY, display_symbol, render_mode_toggle, stock_search_and_pick
+from core.watchlist import list_watchlist, seed_default_watchlist_if_empty
+
+logger = get_logger(__name__)
 
 st.set_page_config(page_title="FinSight", page_icon="\U0001F4C8", layout="wide")
 
 init_db()
-render_mode_toggle()
+seed_default_watchlist_if_empty()
+mode = render_mode_toggle()
 
 st.title("FinSight")
-st.subheader("AI Finance & Trading Intelligence Platform")
+st.caption("AI Finance & Trading Intelligence Platform · Indian markets (NSE/BSE)")
 
-st.markdown(
-    """
-Use the sidebar to navigate:
 
-- **Market Overview** — watchlist, sector heatmap, top movers
-- **Stock Analysis** — candlestick charts with technical indicators
-- **Portfolio** — track holdings, allocation, risk metrics
-- **AI Sentiment** — news sentiment scoring
-- **ML Signals** — direction classifier + backtest
-- **About** — architecture and disclaimer
-"""
-)
+@st.cache_data(ttl=900, show_spinner=False)
+def _load_history(symbol: str) -> pd.DataFrame:
+    return get_price_history(symbol)
+
+
+def _ensure_history(symbol: str) -> pd.DataFrame:
+    history = _load_history(symbol)
+    if history.empty:
+        try:
+            ingest_ticker(symbol)
+            _load_history.clear()
+            history = _load_history(symbol)
+        except IngestionError as exc:
+            logger.warning("Could not ingest %s for home dashboard: %s", symbol, exc)
+            return pd.DataFrame()
+    return history
+
+
+def _pct_change(close: pd.Series, periods: int = 1) -> float | None:
+    if len(close) <= periods:
+        return None
+    return float(close.iloc[-1] / close.iloc[-1 - periods] - 1)
+
+
+status = get_nse_market_status()
+status_color = "green" if status.is_open else "gray"
+st.caption(f":{status_color}[● {status.label}] · {status.current_time_ist.strftime('%d %b %Y, %H:%M')} IST")
+
+index_cols = st.columns(3)
+index_specs = [("Nifty 50", BENCHMARK_NIFTY50), ("Sensex", BENCHMARK_SENSEX), ("Bank Nifty", BENCHMARK_BANKNIFTY)]
+index_pcts: dict[str, float | None] = {}
+for col, (label, symbol) in zip(index_cols, index_specs):
+    with st.spinner(f"Loading {label}..."):
+        history = _ensure_history(symbol)
+    if history.empty:
+        col.metric(label, "—")
+        continue
+    close = history["close"]
+    pct = _pct_change(close, 1)
+    index_pcts[symbol] = pct
+    col.metric(label, f"{close.iloc[-1]:,.2f}", f"{pct:+.2%}" if pct is not None else None)
 
 st.divider()
-st.caption(
-    "FinSight is a signal-research and education tool. Nothing shown here is financial advice."
+
+col_portfolio, col_watchlist = st.columns([1, 2])
+
+with col_portfolio:
+    st.subheader("Portfolio Value")
+    total_value = 0.0
+    any_holdings = False
+    for portfolio in list_portfolios():
+        for holding in list_holdings(portfolio["id"]):
+            holding_history = _load_history(holding["symbol"])
+            if not holding_history.empty:
+                total_value += float(holding_history["close"].iloc[-1]) * holding["shares"]
+                any_holdings = True
+    if any_holdings:
+        st.metric("Across all portfolios" if mode == "Professional" else "What your holdings are worth", format_inr(total_value))
+    else:
+        st.caption("No holdings yet.")
+    st.page_link("pages/3_Portfolio.py", label="Go to Portfolio →")
+
+watchlist_rows: list[dict] = []
+with col_watchlist:
+    st.subheader("Watchlist")
+    for entry in list_watchlist():
+        watchlist_history = _load_history(entry["symbol"])
+        if watchlist_history.empty:
+            continue
+        watchlist_close = watchlist_history["close"]
+        watchlist_rows.append(
+            {
+                "Symbol": display_symbol(entry["symbol"]),
+                "Price": watchlist_close.iloc[-1],
+                "1D %": _pct_change(watchlist_close, 1),
+            }
+        )
+    if watchlist_rows:
+        watchlist_df = pd.DataFrame(watchlist_rows)
+        display_watchlist_df = watchlist_df.copy()
+        display_watchlist_df["1D %"] = display_watchlist_df["1D %"] * 100
+        st.dataframe(
+            display_watchlist_df,
+            use_container_width=True,
+            hide_index=True,
+            height=215,
+            column_config={
+                "Price": st.column_config.NumberColumn(format="₹%.2f"),
+                "1D %": st.column_config.NumberColumn(format="%.2f%%"),
+            },
+        )
+    else:
+        st.caption("Your watchlist is empty.")
+    st.page_link("pages/1_Market_Overview.py", label="Manage watchlist →")
+
+st.divider()
+
+st.subheader("Today's Market, in Brief" if mode == "Simple" else "AI Market Summary")
+top_gainer = None
+top_loser = None
+if watchlist_rows:
+    movers_df = pd.DataFrame(watchlist_rows).dropna(subset=["1D %"])
+    if not movers_df.empty:
+        best = movers_df.loc[movers_df["1D %"].idxmax()]
+        worst = movers_df.loc[movers_df["1D %"].idxmin()]
+        top_gainer = (str(best["Symbol"]), float(best["1D %"]))
+        top_loser = (str(worst["Symbol"]), float(worst["1D %"]))
+
+snapshot = MarketSnapshot(
+    nifty_pct=index_pcts.get(BENCHMARK_NIFTY50),
+    sensex_pct=index_pcts.get(BENCHMARK_SENSEX),
+    banknifty_pct=index_pcts.get(BENCHMARK_BANKNIFTY),
+    top_gainer=top_gainer,
+    top_loser=top_loser,
 )
+summary_text, used_gemini = summarize_market(snapshot)
+st.info(summary_text)
+if not used_gemini and mode == "Professional":
+    st.caption("Rule-based summary -- Gemini unavailable or not configured.")
+
+st.divider()
+
+col_recent, col_quick = st.columns([1, 1])
+with col_recent:
+    st.subheader("Recent Searches")
+    recent_searches: list[str] = st.session_state.get(RECENT_SEARCHES_KEY, [])
+    if recent_searches:
+        for symbol in recent_searches:
+            st.markdown(f"- **{display_symbol(symbol)}**")
+    else:
+        st.caption("Search for a stock anywhere in the app and it'll show up here.")
+
+with col_quick:
+    st.subheader("Quick Search")
+    quick_match = stock_search_and_pick("home_quick_search", label="Find a stock")
+    if quick_match is not None:
+        st.session_state["stock_analysis_symbol"] = quick_match.symbol
+        st.page_link(
+            "pages/2_Stock_Analysis.py",
+            label=f"Open {display_symbol(quick_match.symbol)} in Stock Analysis →",
+        )
+
+st.divider()
+st.caption("FinSight is a signal-research and education tool. Nothing shown here is financial advice.")

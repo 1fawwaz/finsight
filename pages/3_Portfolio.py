@@ -165,7 +165,7 @@ with col_alloc:
             hole=0.4,
         )
     )
-    fig.update_layout(margin=dict(t=10, l=10, r=10, b=10), height=350)
+    theme.apply_dark_layout(fig, margin=dict(t=10, l=10, r=10, b=10), height=350)
     st.plotly_chart(fig, use_container_width=True)
 
 price_df = get_multi_symbol_close(valid_symbols)
@@ -198,10 +198,10 @@ if _ensure_ingested(benchmark_symbol) and len(price_df) >= 2:
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=portfolio_cum.index, y=portfolio_cum * 100, name="Portfolio", line=dict(color=theme.CATEGORICAL[0], width=2)))
-        fig.add_trace(go.Scatter(x=benchmark_cum.index, y=benchmark_cum * 100, name=benchmark_label, line=dict(color=theme.INK_MUTED, width=2, dash="dot")))
-        fig.update_layout(
+        fig.add_trace(go.Scatter(x=benchmark_cum.index, y=benchmark_cum * 100, name=benchmark_label, line=dict(color=theme.DARK_INK_MUTED, width=2, dash="dot")))
+        theme.apply_dark_layout(
+            fig,
             yaxis_title="Cumulative Return (%)",
-            plot_bgcolor="white",
             margin=dict(t=10, l=10, r=10, b=10),
             height=380,
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
@@ -227,7 +227,7 @@ if len(valid_symbols) >= 2 and len(price_df) >= 2:
             texttemplate="%{text}",
         )
     )
-    fig.update_layout(margin=dict(t=10, l=10, r=10, b=10), height=400)
+    theme.apply_dark_layout(fig, margin=dict(t=10, l=10, r=10, b=10), height=400)
     st.plotly_chart(fig, use_container_width=True)
 
 st.divider()

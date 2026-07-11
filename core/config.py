@@ -32,8 +32,11 @@ SUPPORTED_SUFFIXES: tuple[str, ...] = (".NS", ".BO")
 
 BENCHMARK_NIFTY50 = "^NSEI"
 BENCHMARK_SENSEX = "^BSESN"
+BENCHMARK_BANKNIFTY = "^NSEBANK"
 BENCHMARKS: dict[str, str] = {"Nifty 50": BENCHMARK_NIFTY50, "Sensex": BENCHMARK_SENSEX}
-_ALLOWED_NON_SUFFIX_SYMBOLS = {BENCHMARK_NIFTY50, BENCHMARK_SENSEX}
+# Bank Nifty isn't offered as a portfolio benchmark (BENCHMARKS above), only shown as a
+# market-status indicator on the home dashboard -- hence the separate allowlist entry.
+_ALLOWED_NON_SUFFIX_SYMBOLS = {BENCHMARK_NIFTY50, BENCHMARK_SENSEX, BENCHMARK_BANKNIFTY}
 
 HISTORY_PERIOD = "5y"
 

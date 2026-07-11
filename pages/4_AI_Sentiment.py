@@ -81,11 +81,11 @@ else:
             hovertemplate="%{customdata}<br>Sentiment: %{y:.2f}<extra></extra>",
         )
     )
-    fig.add_hline(y=0, line_color=theme.INK_MUTED, line_width=1)
-    fig.update_layout(
+    fig.add_hline(y=0, line_color=theme.DARK_INK_MUTED, line_width=1)
+    theme.apply_dark_layout(
+        fig,
         yaxis_title="Sentiment (-1 to 1)",
         yaxis_range=[-1, 1],
-        plot_bgcolor="white",
         margin=dict(t=10, l=10, r=10, b=10),
         height=320,
     )

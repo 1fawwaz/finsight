@@ -143,7 +143,7 @@ with col_confusion:
             texttemplate="%{text}",
         )
     )
-    fig.update_layout(margin=dict(t=10, l=10, r=10, b=10), height=350, yaxis_autorange="reversed")
+    theme.apply_dark_layout(fig, margin=dict(t=10, l=10, r=10, b=10), height=350, yaxis_autorange="reversed")
     st.plotly_chart(fig, use_container_width=True)
 
 with col_equity:
@@ -162,12 +162,12 @@ with col_equity:
             x=result.equity_buy_hold.index,
             y=result.equity_buy_hold,
             name="Buy & Hold",
-            line=dict(color=theme.INK_MUTED, width=2, dash="dot"),
+            line=dict(color=theme.DARK_INK_MUTED, width=2, dash="dot"),
         )
     )
-    fig.update_layout(
+    theme.apply_dark_layout(
+        fig,
         yaxis_title="Growth of ₹1",
-        plot_bgcolor="white",
         margin=dict(t=10, l=10, r=10, b=10),
         height=350,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),

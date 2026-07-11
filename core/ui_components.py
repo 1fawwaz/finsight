@@ -25,6 +25,20 @@ def _match_labels(matches: list[UniverseEntry]) -> list[str]:
     return [f"{display_symbol(m.symbol)} — {m.name}" for m in matches]
 
 
+RECENT_SEARCHES_KEY = "recent_searches"
+RECENT_SEARCHES_MAX = 8
+
+
+def _record_recent_search(symbol: str) -> None:
+    """Track resolved symbols across the whole session (any page's search box) for the
+    home dashboard's "Recent Searches" panel. Most-recent-first, deduped, capped."""
+    recent = st.session_state.setdefault(RECENT_SEARCHES_KEY, [])
+    if symbol in recent:
+        recent.remove(symbol)
+    recent.insert(0, symbol)
+    del recent[RECENT_SEARCHES_MAX:]
+
+
 def stock_search_and_pick(
     key: str,
     label: str = "Search for a stock",
@@ -46,7 +60,9 @@ def stock_search_and_pick(
         return None
     labels = _match_labels(matches)
     choice = st.selectbox("Select the company", labels, key=f"{key}_choice", label_visibility="collapsed")
-    return matches[labels.index(choice)]
+    picked = matches[labels.index(choice)]
+    _record_recent_search(picked.symbol)
+    return picked
 
 
 def stock_picker(
@@ -72,6 +88,7 @@ def stock_picker(
             labels = _match_labels(matches)
             choice = st.selectbox("Select the company", labels, key=f"{key}_choice")
             st.session_state[key] = matches[labels.index(choice)].symbol
+            _record_recent_search(st.session_state[key])
         else:
             st.caption(f"No NSE-listed company found matching '{query}'. Keeping {display_symbol(st.session_state[key])}.")
 

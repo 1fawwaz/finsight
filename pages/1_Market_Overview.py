@@ -166,7 +166,7 @@ else:
                     ),
                 )
             )
-            fig.update_layout(margin=dict(t=10, l=10, r=10, b=10), height=380)
+            theme.apply_dark_layout(fig, margin=dict(t=10, l=10, r=10, b=10), height=380)
             st.plotly_chart(fig, use_container_width=True)
 
     with col_movers:
@@ -187,12 +187,12 @@ else:
                     textposition="outside",
                 )
             )
-            fig.update_layout(
+            theme.apply_dark_layout(
+                fig,
                 margin=dict(t=10, l=10, r=10, b=10),
                 height=380,
                 xaxis_title="1D % Change",
                 yaxis=dict(autorange="reversed"),
-                plot_bgcolor="white",
             )
             st.plotly_chart(fig, use_container_width=True)
 

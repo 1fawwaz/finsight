@@ -1,0 +1,15 @@
+[theme]
+base = "dark"
+primaryColor = "#2a78d6"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#161a23"
+textColor = "#e8e9ed"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[client]
+# Safety net for any exception a page's own try/except doesn't already catch: show a
+# generic friendly message instead of a raw Python traceback.
+showErrorDetails = false
