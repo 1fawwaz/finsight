@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import streamlit as st
 
+from core.explain import Explanation, PREDICTION_DISCLAIMER
 from core.universe import UniverseEntry, search_universe
 
 SEARCH_PLACEHOLDER = "e.g. Reliance, TCS, INFY, HDFC Bank..."
+
+MOOD_ICON = {"good": "\U0001F7E2", "worried": "\U0001F534", "neutral": "⚪"}
 
 
 def display_symbol(symbol: str) -> str:
@@ -73,3 +76,37 @@ def stock_picker(
             st.caption(f"No NSE-listed company found matching '{query}'. Keeping {display_symbol(st.session_state[key])}.")
 
     return st.session_state[key]
+
+
+MODE_SIMPLE = "Simple"
+MODE_PROFESSIONAL = "Professional"
+
+
+def render_mode_toggle() -> str:
+    """Sidebar Simple/Professional mode toggle, shared and persisted across every page
+    for the whole browser session. Defaults to Simple Mode -- the spec's explicit bar
+    is that a 10-year-old with no finance background can use this app confidently, so
+    plain-language explanations are what a first-time visitor sees unless they opt into
+    Professional Mode themselves.
+    """
+    if "mode" not in st.session_state:
+        st.session_state["mode"] = MODE_SIMPLE
+    with st.sidebar:
+        st.radio(
+            "Mode",
+            options=[MODE_SIMPLE, MODE_PROFESSIONAL],
+            key="mode",
+            help="Simple Mode explains everything in plain language. Professional Mode shows full technical detail.",
+        )
+    return st.session_state["mode"]
+
+
+def render_explanation(explanation: Explanation, mode: str) -> None:
+    """Render one metric's explanation as a mood-colored caption, text chosen by mode."""
+    text = explanation.simple if mode == MODE_SIMPLE else explanation.professional
+    st.caption(f"{MOOD_ICON[explanation.mood]} {text}")
+
+
+def render_prediction_disclaimer() -> None:
+    """Persistent, unmissable disclaimer for any panel showing an AI/ML prediction."""
+    st.warning(f"⚠️ {PREDICTION_DISCLAIMER}")

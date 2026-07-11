@@ -10,7 +10,7 @@ from core.database import init_db
 from core.indicators import rsi
 from core.market_status import get_nse_market_status
 from core.queries import get_price_history, get_ticker_info
-from core.ui_components import display_symbol, stock_search_and_pick
+from core.ui_components import display_symbol, render_mode_toggle, stock_search_and_pick
 from core.watchlist import add_to_watchlist, list_watchlist, remove_from_watchlist, seed_default_watchlist_if_empty
 from core.config import get_logger
 
@@ -21,6 +21,7 @@ st.title("Market Overview")
 
 init_db()
 seed_default_watchlist_if_empty()
+mode = render_mode_toggle()
 
 status = get_nse_market_status()
 status_color = "green" if status.is_open else "gray"
@@ -43,9 +44,15 @@ def _pct_change(close: pd.Series, periods: int) -> float | None:
     return float(close.iloc[-1] / close.iloc[-1 - periods] - 1)
 
 
-def _rsi_badge(value: float | None) -> str:
+def _rsi_badge(value: float | None, mode: str) -> str:
     if value is None or pd.isna(value):
         return "—"
+    if mode == "Simple":
+        if value >= 70:
+            return f"{value:.0f} · Buying fast"
+        if value <= 30:
+            return f"{value:.0f} · Selling fast"
+        return f"{value:.0f} · Calm"
     if value >= 70:
         return f"{value:.0f} · Overbought"
     if value <= 30:
@@ -98,7 +105,7 @@ for symbol in watchlist_symbols:
             "1D %": _pct_change(close, 1),
             "1W %": _pct_change(close, 5),
             "1M %": _pct_change(close, 21),
-            "RSI (14)": _rsi_badge(latest_rsi),
+            "RSI (14)" if mode == "Professional" else "Buying/Selling": _rsi_badge(latest_rsi, mode),
         }
     )
 

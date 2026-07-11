@@ -79,3 +79,26 @@ def train_model(features: pd.DataFrame, labels: pd.Series) -> RandomForestClassi
     )
     model.fit(features, labels)
     return model
+
+
+def predict_next_direction(
+    price_df: pd.DataFrame, sentiment_by_date: Optional[pd.Series] = None
+) -> Optional[tuple[bool, float]]:
+    """Train on all available labeled history and predict tomorrow's direction from today's
+    feature row -- the one row `make_dataset` always drops, since its label (tomorrow's
+    direction) doesn't exist yet. No lookahead: the model never sees today's own outcome.
+
+    Returns (predicted_up, probability_up), or None if there's too little history to train
+    on or today's feature row isn't fully computable yet (e.g. NaN from a rolling warm-up).
+    """
+    features, labels = make_dataset(price_df, sentiment_by_date)
+    if len(features) < 50:
+        return None
+
+    latest_features = build_features(price_df, sentiment_by_date).iloc[[-1]]
+    if latest_features.isna().to_numpy().any():
+        return None
+
+    model = train_model(features, labels)
+    probability_up = float(model.predict_proba(latest_features)[0][list(model.classes_).index(1)])
+    return probability_up >= 0.5, probability_up

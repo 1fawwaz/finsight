@@ -7,6 +7,7 @@ import streamlit as st
 from core import theme
 from core.config import BENCHMARKS, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
+from core.explain import explain_drawdown, explain_sharpe
 from core.formatting import format_inr
 from core.portfolio import (
     add_holding,
@@ -21,12 +22,14 @@ from core.portfolio import (
     sharpe_ratio,
 )
 from core.queries import get_multi_symbol_close, get_price_history
-from core.ui_components import display_symbol, stock_search_and_pick
+from core.ui_components import display_symbol, render_explanation, render_mode_toggle, stock_search_and_pick
 
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="FinSight | Portfolio", page_icon="\U0001F4C8", layout="wide")
 st.title("Portfolio")
+
+mode = render_mode_toggle()
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -177,8 +180,10 @@ with col_metrics:
         sharpe = sharpe_ratio(daily_returns)
         drawdown = max_drawdown(portfolio_value)
         metric_cols = st.columns(2)
-        metric_cols[0].metric("Sharpe Ratio", f"{sharpe:.2f}")
-        metric_cols[1].metric("Max Drawdown", f"{drawdown:.1%}")
+        metric_cols[0].metric("Sharpe Ratio" if mode == "Professional" else "Reward for the risk", f"{sharpe:.2f}")
+        metric_cols[1].metric("Max Drawdown" if mode == "Professional" else "Worst dip from a peak", f"{drawdown:.1%}")
+        render_explanation(explain_sharpe(sharpe), mode)
+        render_explanation(explain_drawdown(drawdown), mode)
 
 st.divider()
 benchmark_label = st.radio("Benchmark", options=list(BENCHMARKS.keys()), index=0, horizontal=True)

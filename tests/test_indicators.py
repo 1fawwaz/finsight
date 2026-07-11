@@ -6,7 +6,21 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.indicators import bollinger_bands, ema, log_returns, macd, returns, rsi, sma, volatility
+from core.indicators import (
+    adx,
+    atr,
+    bollinger_bands,
+    ema,
+    log_returns,
+    macd,
+    returns,
+    rsi,
+    sma,
+    support_resistance,
+    true_range,
+    volatility,
+    vwap,
+)
 
 
 def _reference_sma(values: list[float], window: int) -> list[float | None]:
@@ -123,3 +137,104 @@ def test_volatility_annualization_factor():
 
     ratio = (annualized.dropna() / raw_std.dropna()).unique()
     assert ratio == pytest.approx(math.sqrt(252), rel=1e-9)
+
+
+def _make_ohlcv(n: int, seed: int = 7) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    close = pd.Series(100 + np.cumsum(rng.normal(0, 1, n)))
+    high = close + rng.uniform(0.5, 2.0, n)
+    low = close - rng.uniform(0.5, 2.0, n)
+    volume = pd.Series(rng.integers(100_000, 1_000_000, n).astype(float))
+    return pd.DataFrame({"high": high, "low": low, "close": close, "volume": volume})
+
+
+def test_true_range_matches_manual_formula():
+    df = _make_ohlcv(10)
+    tr = true_range(df["high"], df["low"], df["close"])
+    prev_close = df["close"].shift(1)
+    for i in range(1, len(df)):
+        expected = max(
+            df["high"].iloc[i] - df["low"].iloc[i],
+            abs(df["high"].iloc[i] - prev_close.iloc[i]),
+            abs(df["low"].iloc[i] - prev_close.iloc[i]),
+        )
+        assert tr.iloc[i] == pytest.approx(expected)
+
+
+def _reference_atr(high: list[float], low: list[float], close: list[float], window: int) -> list[float | None]:
+    trs = []
+    for i in range(len(close)):
+        if i == 0:
+            trs.append(high[i] - low[i])
+        else:
+            trs.append(max(high[i] - low[i], abs(high[i] - close[i - 1]), abs(low[i] - close[i - 1])))
+    out: list[float | None] = []
+    avg = None
+    for i in range(len(trs)):
+        if i + 1 < window:
+            out.append(None)
+            continue
+        if avg is None:
+            avg = sum(trs[i + 1 - window : i + 1]) / window
+        else:
+            avg = (avg * (window - 1) + trs[i]) / window
+        out.append(avg)
+    return out
+
+
+def test_atr_matches_wilder_reference():
+    df = _make_ohlcv(15)
+    expected = _reference_atr(df["high"].tolist(), df["low"].tolist(), df["close"].tolist(), window=5)
+    result = atr(df["high"], df["low"], df["close"], window=5)
+
+    for i, exp in enumerate(expected):
+        if exp is None:
+            assert math.isnan(result.iloc[i])
+        else:
+            assert result.iloc[i] == pytest.approx(exp, rel=1e-6)
+
+
+def test_atr_is_never_negative():
+    df = _make_ohlcv(40)
+    result = atr(df["high"], df["low"], df["close"], window=14)
+    assert (result.dropna() >= 0).all()
+
+
+def test_adx_is_bounded_zero_to_hundred():
+    df = _make_ohlcv(60)
+    result = adx(df["high"], df["low"], df["close"], window=14)
+    valid = result.dropna()
+    assert len(valid) > 0
+    assert (valid >= 0).all()
+    assert (valid <= 100).all()
+
+
+def test_vwap_matches_manual_rolling_calculation():
+    df = _make_ohlcv(30)
+    window = 10
+    result = vwap(df["high"], df["low"], df["close"], df["volume"], window=window)
+
+    typical = (df["high"] + df["low"] + df["close"]) / 3
+    idx = 15
+    expected = (typical.iloc[idx - window + 1 : idx + 1] * df["volume"].iloc[idx - window + 1 : idx + 1]).sum() / df[
+        "volume"
+    ].iloc[idx - window + 1 : idx + 1].sum()
+    assert result.iloc[idx] == pytest.approx(expected)
+
+
+def test_support_resistance_are_rolling_min_max():
+    df = _make_ohlcv(30)
+    window = 10
+    bands = support_resistance(df["high"], df["low"], window=window)
+
+    expected_support = df["low"].rolling(window=window, min_periods=window).min()
+    expected_resistance = df["high"].rolling(window=window, min_periods=window).max()
+    pd.testing.assert_series_equal(bands["support"], expected_support, check_names=False)
+    pd.testing.assert_series_equal(bands["resistance"], expected_resistance, check_names=False)
+
+
+def test_support_is_never_above_resistance():
+    df = _make_ohlcv(40)
+    bands = support_resistance(df["high"], df["low"], window=20)
+    valid = bands.dropna()
+    assert (valid["support"] <= valid["resistance"]).all()

@@ -88,3 +88,70 @@ def bollinger_bands(close: pd.Series, window: int = 20, num_std: float = 2.0) ->
     upper = middle + num_std * std
     lower = middle - num_std * std
     return pd.DataFrame({"middle": middle, "upper": upper, "lower": lower})
+
+
+def true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
+    """True Range: the largest of today's high-low, |high - prev close|, |low - prev close|."""
+    prev_close = close.shift(1)
+    return pd.concat(
+        [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
+    ).max(axis=1)
+
+
+def atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> pd.Series:
+    """Average True Range: Wilder-smoothed true range, a measure of how much a stock
+    typically moves per day (in price units, not a percentage)."""
+    tr = true_range(high, low, close)
+    return _atr_smooth(tr, window)
+
+
+def _atr_smooth(tr: pd.Series, window: int) -> pd.Series:
+    # True range has no leading NaN (unlike diff()-based series), so seed directly
+    # from its first `window` values rather than reusing _wilder_smooth's diff-shaped
+    # assumption of a leading NaN.
+    seed = tr.iloc[:window].mean()
+    seeded = tr.copy()
+    seeded.iloc[: window - 1] = np.nan
+    seeded.iloc[window - 1] = seed
+    return seeded.ewm(alpha=1 / window, adjust=False, min_periods=1).mean()
+
+
+def adx(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> pd.Series:
+    """Average Directional Index: strength of a trend (any direction) on a 0-100 scale,
+    regardless of whether it's trending up or down."""
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+    minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+
+    tr = true_range(high, low, close)
+    smoothed_tr = _atr_smooth(tr, window)
+    smoothed_plus_dm = _atr_smooth(plus_dm, window)
+    smoothed_minus_dm = _atr_smooth(minus_dm, window)
+
+    plus_di = 100 * (smoothed_plus_dm / smoothed_tr)
+    minus_di = 100 * (smoothed_minus_dm / smoothed_tr)
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    return _atr_smooth(dx, window)
+
+
+def vwap(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series, window: int = 20) -> pd.Series:
+    """Rolling Volume-Weighted Average Price over `window` days.
+
+    True VWAP is normally computed intraday from tick/minute data reset each session;
+    since FinSight only stores daily OHLCV bars, this is a `window`-day rolling
+    approximation using the daily typical price ((high+low+close)/3), a common
+    adaptation when only daily bars are available.
+    """
+    typical_price = (high + low + close) / 3
+    pv = typical_price * volume
+    return pv.rolling(window=window, min_periods=window).sum() / volume.rolling(window=window, min_periods=window).sum()
+
+
+def support_resistance(high: pd.Series, low: pd.Series, window: int = 20) -> pd.DataFrame:
+    """Rolling support/resistance: the lowest low and highest high over the trailing
+    `window` days -- simple, widely-used proxies for "price floor" and "price ceiling"
+    levels, not a claim of exact future turning points."""
+    resistance = high.rolling(window=window, min_periods=window).max()
+    support = low.rolling(window=window, min_periods=window).min()
+    return pd.DataFrame({"support": support, "resistance": resistance})

@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.ml_model import build_features, build_labels, make_dataset, train_model
+from core.ml_model import build_features, build_labels, make_dataset, predict_next_direction, train_model
 
 
 def _synthetic_price_df(n: int = 80, seed: int = 7) -> pd.DataFrame:
@@ -82,3 +82,33 @@ def test_train_model_returns_fitted_classifier():
     preds = model.predict(features)
     assert len(preds) == len(features)
     assert set(preds.tolist()) <= {0, 1}
+
+
+def test_predict_next_direction_returns_prediction_and_probability():
+    price_df = _synthetic_price_df(n=200)
+    result = predict_next_direction(price_df)
+
+    assert result is not None
+    predicted_up, probability_up = result
+    assert isinstance(predicted_up, bool)
+    assert 0.0 <= probability_up <= 1.0
+    assert predicted_up == (probability_up >= 0.5)
+
+
+def test_predict_next_direction_none_with_insufficient_history():
+    price_df = _synthetic_price_df(n=30)
+    assert predict_next_direction(price_df) is None
+
+
+def test_predict_next_direction_uses_todays_row_not_seen_in_training():
+    """The predicted row must be the one make_dataset necessarily drops (today's, with
+    no label yet) -- proving the model never trains on the very row it predicts."""
+    price_df = _synthetic_price_df(n=200)
+    features, _ = make_dataset(price_df)
+    full_features = build_features(price_df)
+
+    assert features.index[-1] != full_features.index[-1]
+    assert full_features.index[-1] == price_df.index[-1]
+
+    result = predict_next_direction(price_df)
+    assert result is not None

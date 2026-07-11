@@ -8,21 +8,26 @@ from core import theme
 from core.backtester import walk_forward_backtest
 from core.config import DEFAULT_TICKERS, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
-from core.ml_model import make_dataset
+from core.explain import explain_ml_prediction
+from core.ml_model import make_dataset, predict_next_direction
 from core.queries import get_price_history
 from core.sentiment import get_stored_sentiment
-from core.ui_components import stock_picker
+from core.ui_components import render_explanation, render_mode_toggle, render_prediction_disclaimer, stock_picker
 
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="FinSight | ML Signals", page_icon="\U0001F4C8", layout="wide")
 st.title("ML Signals")
 
-st.warning(
-    "**This is not trading advice.** A realistic direction classifier on daily equity data "
-    "typically lands around **52-58% accuracy** — barely better than a coin flip. Treat every "
-    "number on this page as a research signal, not a recommendation to trade."
-)
+mode = render_mode_toggle()
+
+render_prediction_disclaimer()
+if mode == "Professional":
+    st.caption(
+        "A realistic direction classifier on daily equity data typically lands around "
+        "**52-58% accuracy** — barely better than a coin flip. Treat every number on this "
+        "page as a research signal, not a recommendation to trade."
+    )
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -48,6 +53,13 @@ def _run_backtest(symbol: str, train_window: int, test_window: int):
     return walk_forward_backtest(features, labels, history["close"], train_window=train_window, test_window=test_window)
 
 
+@st.cache_data(ttl=900, show_spinner=False)
+def _predict_next(symbol: str):
+    history = _load_history(symbol)
+    sentiment_series = _load_sentiment_series(symbol)
+    return predict_next_direction(history, sentiment_by_date=sentiment_series)
+
+
 symbol = stock_picker("ml_signals_symbol", default_symbol=DEFAULT_TICKERS[0])
 
 if _load_history(symbol).empty:
@@ -63,6 +75,29 @@ history = _load_history(symbol)
 years_available = (history.index[-1] - history.index[0]).days / 365.25
 if years_available < 1.5:
     st.warning(f"Only {years_available:.1f} years of history for {symbol} — results below may be unreliable.")
+
+st.divider()
+st.subheader("Tomorrow's Guess" if mode == "Simple" else "Next-Day Prediction")
+next_prediction = _predict_next(symbol)
+if next_prediction is None:
+    st.caption("Not enough history yet to make a prediction for this ticker.")
+else:
+    predicted_up, probability_up = next_prediction
+    has_backtest = st.session_state.get("ml_symbol") == symbol and "ml_result" in st.session_state
+    historical_accuracy = st.session_state["ml_result"].accuracy if has_backtest else 0.55
+    pred_cols = st.columns([1, 3])
+    pred_cols[0].metric(
+        "Direction" if mode == "Professional" else "Guess",
+        "⬆ Up" if predicted_up else "⬇ Down",
+        f"{probability_up:.0%} confidence" if mode == "Professional" else None,
+    )
+    with pred_cols[1]:
+        render_explanation(explain_ml_prediction(predicted_up, probability_up, historical_accuracy), mode)
+        if not has_backtest:
+            st.caption(
+                "Run the backtest below to see exactly how often this model has been right for "
+                f"{symbol} historically -- the number above uses a general baseline until then."
+            )
 
 if st.button("Run Walk-Forward Backtest"):
     with st.spinner(f"Training and backtesting on {symbol} (this walks forward year by year, so it takes a bit)..."):
@@ -83,10 +118,16 @@ result = st.session_state["ml_result"]
 st.divider()
 st.subheader("Honest Performance")
 metric_cols = st.columns(4)
-metric_cols[0].metric("Accuracy", f"{result.accuracy:.1%}")
-metric_cols[1].metric("Precision", f"{result.precision:.1%}")
-metric_cols[2].metric("Recall", f"{result.recall:.1%}")
+metric_cols[0].metric("Accuracy" if mode == "Professional" else "Right guesses", f"{result.accuracy:.1%}")
+metric_cols[1].metric("Precision" if mode == "Professional" else "Right when it said 'up'", f"{result.precision:.1%}")
+metric_cols[2].metric("Recall" if mode == "Professional" else "Caught how many real 'up' days", f"{result.recall:.1%}")
 metric_cols[3].metric("Out-of-sample days", f"{len(result.predictions):,}")
+if mode == "Simple":
+    st.caption(
+        f"Out of every 10 guesses this computer made in the past, about "
+        f"{round(result.accuracy * 10)} were right. That's only a little better than flipping "
+        "a coin -- so treat it as a hint, not a promise."
+    )
 
 col_confusion, col_equity = st.columns(2)
 

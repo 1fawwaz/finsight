@@ -3,10 +3,12 @@
 import streamlit as st
 
 from core.database import init_db
+from core.ui_components import render_mode_toggle
 
 st.set_page_config(page_title="FinSight", page_icon="\U0001F4C8", layout="wide")
 
 init_db()
+render_mode_toggle()
 
 st.title("FinSight")
 st.subheader("AI Finance & Trading Intelligence Platform")

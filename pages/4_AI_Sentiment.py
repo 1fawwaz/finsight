@@ -7,14 +7,17 @@ import streamlit as st
 from core import theme
 from core.config import DEFAULT_TICKERS, GEMINI_API_KEY, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
+from core.explain import explain_sentiment
 from core.queries import get_price_history
 from core.sentiment import analyze_ticker_sentiment, get_stored_sentiment
-from core.ui_components import stock_picker
+from core.ui_components import render_explanation, render_mode_toggle, stock_picker
 
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="FinSight | AI Sentiment", page_icon="\U0001F4C8", layout="wide")
 st.title("AI Sentiment")
+
+mode = render_mode_toggle()
 
 if not GEMINI_API_KEY:
     st.info(
@@ -63,6 +66,9 @@ if not stored:
     )
 else:
     sentiment_df = pd.DataFrame(stored).sort_values("date")
+
+    overall = explain_sentiment(float(sentiment_df["sentiment"].mean()))
+    render_explanation(overall, mode)
 
     st.subheader("Sentiment Timeline")
     colors = [theme.STATUS_GOOD if s >= 0 else theme.STATUS_CRITICAL for s in sentiment_df["sentiment"]]

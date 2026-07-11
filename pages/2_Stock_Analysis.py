@@ -8,15 +8,28 @@ import streamlit as st
 from core import theme
 from core.config import DEFAULT_TICKERS, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
+from core.explain import (
+    explain_adx,
+    explain_atr,
+    explain_bollinger,
+    explain_macd,
+    explain_resistance,
+    explain_rsi,
+    explain_support,
+    explain_volatility,
+    explain_vwap,
+)
 from core.formatting import format_inr
-from core.indicators import bollinger_bands, ema, macd, rsi, sma, volatility
+from core.indicators import adx, atr, bollinger_bands, ema, macd, rsi, sma, support_resistance, volatility, vwap
 from core.queries import get_price_history
-from core.ui_components import stock_picker
+from core.ui_components import render_explanation, render_mode_toggle, stock_picker
 
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="FinSight | Stock Analysis", page_icon="\U0001F4C8", layout="wide")
 st.title("Stock Analysis")
+
+mode = render_mode_toggle()
 
 RANGE_OPTIONS = {"1M": 21, "3M": 63, "6M": 126, "1Y": 252, "3Y": 756, "5Y": 1260}
 
@@ -51,12 +64,25 @@ if history.empty:
 
 st.subheader(symbol)
 
-overlay_cols = st.columns(3)
-show_sma = overlay_cols[0].checkbox("SMA (20)", value=True)
-show_ema = overlay_cols[1].checkbox("EMA (20)", value=False)
-show_bollinger = overlay_cols[2].checkbox("Bollinger Bands (20, 2σ)", value=False)
+if mode == "Professional":
+    overlay_cols = st.columns(5)
+    show_sma = overlay_cols[0].checkbox("SMA (20)", value=True)
+    show_ema = overlay_cols[1].checkbox("EMA (20)", value=False)
+    show_bollinger = overlay_cols[2].checkbox("Bollinger Bands (20, 2σ)", value=False)
+    show_vwap = overlay_cols[3].checkbox("VWAP (20d rolling)", value=False)
+    show_support_resistance = overlay_cols[4].checkbox("Support / Resistance", value=False)
+else:
+    overlay_cols = st.columns(3)
+    show_sma = overlay_cols[0].checkbox("Trend line (20-day average)", value=True)
+    show_ema = overlay_cols[1].checkbox("Faster trend line", value=False)
+    show_bollinger = overlay_cols[2].checkbox("Normal price range", value=False)
+    show_vwap = False
+    show_support_resistance = False
 
 full_close = history["close"]
+full_high = history["high"]
+full_low = history["low"]
+full_volume = history["volume"]
 window = RANGE_OPTIONS[range_label]
 visible = history.tail(window)
 
@@ -111,6 +137,25 @@ if show_bollinger:
         row=1,
         col=1,
     )
+if show_vwap:
+    vwap_series = vwap(full_high, full_low, full_close, full_volume, window=20).reindex(visible.index)
+    fig.add_trace(
+        go.Scatter(x=visible.index, y=vwap_series, name="VWAP (20d)", line=dict(color=theme.CATEGORICAL[2], width=2, dash="dash")),
+        row=1,
+        col=1,
+    )
+if show_support_resistance:
+    sr = support_resistance(full_high, full_low, window=20).reindex(visible.index)
+    fig.add_trace(
+        go.Scatter(x=visible.index, y=sr["resistance"], name="Resistance", line=dict(color=theme.STATUS_CRITICAL, width=1, dash="dot")),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(x=visible.index, y=sr["support"], name="Support", line=dict(color=theme.STATUS_GOOD, width=1, dash="dot")),
+        row=1,
+        col=1,
+    )
 
 volume_colors = [
     theme.STATUS_GOOD if c >= o else theme.STATUS_CRITICAL for o, c in zip(visible["open"], visible["close"])
@@ -162,12 +207,57 @@ st.subheader("Key Stats")
 last_close = full_close.iloc[-1]
 last_year = full_close.tail(252)
 vol_series = volatility(full_close, window=20, annualize=True)
-stat_cols = st.columns(5)
+atr_series = atr(full_high, full_low, full_close, window=14)
+adx_series = adx(full_high, full_low, full_close, window=14)
+latest_vol = vol_series.iloc[-1] if pd.notna(vol_series.iloc[-1]) else None
+latest_atr = atr_series.iloc[-1] if pd.notna(atr_series.iloc[-1]) else None
+latest_adx = adx_series.iloc[-1] if pd.notna(adx_series.iloc[-1]) else None
+
+stat_cols = st.columns(4)
 stat_cols[0].metric("Last Close", format_inr(last_close))
 stat_cols[1].metric("52W High", format_inr(last_year.max()))
 stat_cols[2].metric("52W Low", format_inr(last_year.min()))
 stat_cols[3].metric("Avg Volume (20d)", f"{history['volume'].tail(20).mean():,.0f}")
-stat_cols[4].metric("Volatility (ann., 20d)", f"{vol_series.iloc[-1]:.1%}" if pd.notna(vol_series.iloc[-1]) else "—")
+
+stat_cols_2 = st.columns(4)
+stat_cols_2[0].metric("Volatility (ann., 20d)" if mode == "Professional" else "How bumpy (yearly)", f"{latest_vol:.1%}" if latest_vol is not None else "—")
+stat_cols_2[1].metric("ATR (14)" if mode == "Professional" else "Typical daily swing", format_inr(latest_atr) if latest_atr is not None else "—")
+stat_cols_2[2].metric("ADX (14)" if mode == "Professional" else "Trend strength", f"{latest_adx:.0f}" if latest_adx is not None else "—")
+latest_rsi_value = rsi(full_close, window=14).iloc[-1]
+stat_cols_2[3].metric("RSI (14)" if mode == "Professional" else "Buying/selling speed", f"{latest_rsi_value:.0f}" if pd.notna(latest_rsi_value) else "—")
+
+st.subheader("What does this mean?" if mode == "Simple" else "Indicator Notes")
+macd_latest = macd_df.iloc[-1] if not macd_df.empty else None
+explanations = [
+    explain_rsi(latest_rsi_value if pd.notna(latest_rsi_value) else None),
+    explain_macd(
+        macd_latest["macd"] if macd_latest is not None and pd.notna(macd_latest["macd"]) else None,
+        macd_latest["signal"] if macd_latest is not None and pd.notna(macd_latest["signal"]) else None,
+    ),
+    explain_volatility(latest_vol),
+    explain_atr(latest_atr, float(last_close)),
+    explain_adx(latest_adx),
+]
+if show_bollinger:
+    latest_bands = bands.dropna().iloc[-1] if not bands.dropna().empty else None
+    explanations.append(
+        explain_bollinger(
+            float(last_close),
+            float(latest_bands["upper"]) if latest_bands is not None else None,
+            float(latest_bands["lower"]) if latest_bands is not None else None,
+        )
+    )
+if show_vwap:
+    latest_vwap = vwap_series.dropna()
+    explanations.append(explain_vwap(float(last_close), float(latest_vwap.iloc[-1]) if not latest_vwap.empty else None))
+if show_support_resistance:
+    latest_sr = sr.dropna()
+    if not latest_sr.empty:
+        explanations.append(explain_support(float(last_close), float(latest_sr["support"].iloc[-1])))
+        explanations.append(explain_resistance(float(last_close), float(latest_sr["resistance"].iloc[-1])))
+
+for explanation in explanations:
+    render_explanation(explanation, mode)
 
 st.divider()
 st.caption("FinSight is a signal-research and education tool. Nothing shown here is financial advice.")
