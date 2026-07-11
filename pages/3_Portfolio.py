@@ -159,7 +159,7 @@ with col_alloc:
     st.subheader("Allocation")
     fig = go.Figure(
         go.Pie(
-            labels=list(weights.keys()),
+            labels=[display_symbol(s) for s in weights.keys()],
             values=list(weights.values()),
             marker=dict(colors=theme.CATEGORICAL[: len(weights)]),
             hole=0.4,
@@ -216,11 +216,12 @@ if len(valid_symbols) >= 2 and len(price_df) >= 2:
     st.divider()
     st.subheader("Correlation Matrix")
     corr = correlation_matrix(price_df)
+    corr_labels = [display_symbol(s) for s in corr.columns]
     fig = go.Figure(
         go.Heatmap(
             z=corr.values,
-            x=corr.columns,
-            y=corr.index,
+            x=corr_labels,
+            y=corr_labels,
             colorscale=theme.DIVERGING_BLUE_RED,
             zmid=0,
             zmin=-1,
