@@ -22,7 +22,7 @@ from core.explain import (
 from core.formatting import format_inr
 from core.indicators import adx, atr, bollinger_bands, ema, macd, rsi, sma, support_resistance, volatility, vwap
 from core.queries import get_price_history
-from core.ui_components import render_ai_panel, render_explanation, render_mode_toggle, stock_picker
+from core.ui_components import display_symbol, render_ai_panel, render_explanation, render_mode_toggle, stock_picker
 
 logger = get_logger(__name__)
 
@@ -49,20 +49,20 @@ with col_range:
 history = _load_history(symbol)
 
 if history.empty:
-    with st.spinner(f"Fetching {symbol} from Yahoo Finance..."):
+    with st.spinner(f"Fetching {display_symbol(symbol)} from Yahoo Finance..."):
         try:
             ingest_ticker(symbol)
             _load_history.clear()
             history = _load_history(symbol)
         except IngestionError as exc:
-            st.warning(f"Couldn't fetch {symbol}: {exc}")
+            st.warning(f"Couldn't fetch {display_symbol(symbol)}: {exc}")
             st.stop()
 
 if history.empty:
-    st.warning(f"No price data available for {symbol}.")
+    st.warning(f"No price data available for {display_symbol(symbol)}.")
     st.stop()
 
-st.subheader(symbol)
+st.subheader(display_symbol(symbol))
 
 if mode == "Professional":
     overlay_cols = st.columns(5)
@@ -261,7 +261,7 @@ for explanation in explanations:
 
 st.divider()
 ai_panel_data = {
-    "symbol": symbol,
+    "symbol": display_symbol(symbol),
     "last_close": round(float(last_close), 2),
     "rsi_14": round(float(latest_rsi_value), 1) if pd.notna(latest_rsi_value) else None,
     "macd": round(float(macd_latest["macd"]), 2) if macd_latest is not None and pd.notna(macd_latest["macd"]) else None,
@@ -273,7 +273,7 @@ ai_panel_data = {
     "52w_low": round(float(last_year.min()), 2),
 }
 ai_fallback = " ".join((e.simple if mode == "Simple" else e.professional) for e in explanations)
-render_ai_panel(f"Technical analysis for {symbol}", ai_panel_data, ai_fallback, mode)
+render_ai_panel(f"Technical analysis for {display_symbol(symbol)}", ai_panel_data, ai_fallback, mode)
 
 st.divider()
 st.caption("FinSight is a signal-research and education tool. Nothing shown here is financial advice.")

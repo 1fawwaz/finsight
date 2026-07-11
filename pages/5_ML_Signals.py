@@ -12,7 +12,14 @@ from core.explain import explain_ml_prediction
 from core.ml_model import make_dataset, predict_next_direction
 from core.queries import get_price_history
 from core.sentiment import get_stored_sentiment
-from core.ui_components import render_ai_panel, render_explanation, render_mode_toggle, render_prediction_disclaimer, stock_picker
+from core.ui_components import (
+    display_symbol,
+    render_ai_panel,
+    render_explanation,
+    render_mode_toggle,
+    render_prediction_disclaimer,
+    stock_picker,
+)
 
 logger = get_logger(__name__)
 
@@ -63,18 +70,18 @@ def _predict_next(symbol: str):
 symbol = stock_picker("ml_signals_symbol", default_symbol=DEFAULT_TICKERS[0])
 
 if _load_history(symbol).empty:
-    with st.spinner(f"Fetching {symbol} from Yahoo Finance..."):
+    with st.spinner(f"Fetching {display_symbol(symbol)} from Yahoo Finance..."):
         try:
             ingest_ticker(symbol)
             _load_history.clear()
         except IngestionError as exc:
-            st.warning(f"Couldn't fetch {symbol}: {exc}")
+            st.warning(f"Couldn't fetch {display_symbol(symbol)}: {exc}")
             st.stop()
 
 history = _load_history(symbol)
 years_available = (history.index[-1] - history.index[0]).days / 365.25
 if years_available < 1.5:
-    st.warning(f"Only {years_available:.1f} years of history for {symbol} — results below may be unreliable.")
+    st.warning(f"Only {years_available:.1f} years of history for {display_symbol(symbol)} — results below may be unreliable.")
 
 st.divider()
 st.subheader("Tomorrow's Guess" if mode == "Simple" else "Next-Day Prediction")
@@ -96,11 +103,11 @@ else:
         if not has_backtest:
             st.caption(
                 "Run the backtest below to see exactly how often this model has been right for "
-                f"{symbol} historically -- the number above uses a general baseline until then."
+                f"{display_symbol(symbol)} historically -- the number above uses a general baseline until then."
             )
 
 if st.button("Run Walk-Forward Backtest"):
-    with st.spinner(f"Training and backtesting on {symbol} (this walks forward year by year, so it takes a bit)..."):
+    with st.spinner(f"Training and backtesting on {display_symbol(symbol)} (this walks forward year by year, so it takes a bit)..."):
         try:
             result = _run_backtest(symbol, train_window=252, test_window=21)
             st.session_state["ml_result"] = result
@@ -176,7 +183,7 @@ with col_equity:
 
 st.divider()
 ml_ai_data = {
-    "symbol": symbol,
+    "symbol": display_symbol(symbol),
     "accuracy": round(float(result.accuracy), 3),
     "precision": round(float(result.precision), 3),
     "recall": round(float(result.recall), 3),
@@ -193,7 +200,7 @@ ml_fallback = (
     f"over {len(result.predictions)} out-of-sample days -- consistent with the ~52-58% ceiling typical of daily "
     "equity direction classifiers."
 )
-render_ai_panel(f"ML direction-classifier results for {symbol}", ml_ai_data, ml_fallback, mode)
+render_ai_panel(f"ML direction-classifier results for {display_symbol(symbol)}", ml_ai_data, ml_fallback, mode)
 
 st.divider()
 st.caption("FinSight is a signal-research and education tool. Nothing shown here is financial advice.")

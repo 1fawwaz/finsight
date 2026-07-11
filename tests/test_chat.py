@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.chat import _fallback_answer, answer_question, extract_symbols
+from core.chat import _fallback_answer, answer_question, extract_symbols, gather_context
 
 
 @pytest.mark.parametrize(
@@ -51,12 +51,33 @@ def test_fallback_answer_without_symbols_is_helpful_not_blank():
 
 def test_fallback_answer_with_symbol_data_summarizes_it():
     context = {
-        "mentioned_symbols": ["TCS.NS"],
-        "TCS.NS": {"available": True, "last_close": 3500.0, "rsi_14": 55.0},
+        "mentioned_symbols": ["TCS"],
+        "TCS": {"available": True, "last_close": 3500.0, "rsi_14": 55.0},
     }
     text = _fallback_answer("How is TCS doing?", context)
     assert "TCS" in text
     assert "3500.0" in text
+
+
+def test_fallback_answer_never_shows_ns_suffix():
+    context = {
+        "mentioned_symbols": ["TCS"],
+        "TCS": {"available": True, "last_close": 3500.0, "rsi_14": 55.0},
+    }
+    text = _fallback_answer("How is TCS doing?", context)
+    assert ".NS" not in text
+    assert ".BO" not in text
+
+
+def test_gather_context_never_embeds_ns_or_bo_suffix():
+    # gather_context's return value is embedded verbatim into the Gemini prompt, and an
+    # LLM will readily echo back whatever's in its context -- so no key or value here
+    # may contain a `.NS`/`.BO` suffix, or it could leak into a Gemini-generated answer
+    # shown to the user (the one thing the spec says must never happen).
+    context = gather_context("Should I buy TCS?")
+    serialized = str(context)
+    assert ".NS" not in serialized
+    assert ".BO" not in serialized
 
 
 def test_answer_question_falls_back_without_api_key(monkeypatch):

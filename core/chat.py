@@ -90,14 +90,20 @@ def extract_symbols(question: str, max_symbols: int = 3) -> list[str]:
 
 
 def _symbol_context(symbol: str) -> dict:
-    """Grounding data for one symbol: latest price/indicators, sentiment, ML view."""
+    """Grounding data for one symbol: latest price/indicators, sentiment, ML view.
+
+    `symbol` (the canonical `.NS`/`.BO` form) is used for the actual DB/network lookups,
+    but never appears in the returned dict -- this dict gets embedded verbatim into
+    Gemini's prompt text, and an LLM will readily echo back whatever's in its context,
+    so the suffix has to be stripped here rather than trusted to be stripped later.
+    """
     history = get_price_history(symbol)
     if history.empty:
-        return {"symbol": symbol, "available": False}
+        return {"symbol": display_symbol(symbol), "available": False}
 
     close = history["close"]
     context: dict = {
-        "symbol": symbol,
+        "symbol": display_symbol(symbol),
         "available": True,
         "last_close": round(float(close.iloc[-1]), 2),
         "1d_change_pct": round(float(close.iloc[-1] / close.iloc[-2] - 1), 4) if len(close) > 1 else None,
@@ -162,11 +168,15 @@ def _market_context() -> dict:
 def gather_context(question: str) -> dict:
     """Assemble grounding data for a question: per-symbol data for any tickers
     mentioned, plus portfolio and market context (cheap, always useful for comparisons
-    and "how's the market" questions)."""
+    and "how's the market" questions).
+
+    Keyed by display symbol (no `.NS`/`.BO`) throughout, not the canonical form used
+    internally for lookups -- this dict is what gets embedded in the Gemini prompt.
+    """
     symbols = extract_symbols(question)
-    context: dict = {"mentioned_symbols": symbols}
+    context: dict = {"mentioned_symbols": [display_symbol(s) for s in symbols]}
     for symbol in symbols:
-        context[symbol] = _symbol_context(symbol)
+        context[display_symbol(symbol)] = _symbol_context(symbol)
     context["market"] = _market_context()
     portfolio_context = _portfolio_context()
     if portfolio_context:
@@ -187,7 +197,7 @@ def _fallback_answer(question: str, context: dict) -> str:
     for symbol in symbols:
         data = context.get(symbol, {})
         if not data.get("available"):
-            lines.append(f"- {display_symbol(symbol)}: no price data yet.")
+            lines.append(f"- {symbol}: no price data yet.")
             continue
         bits = [f"last close ₹{data['last_close']}"]
         if data.get("rsi_14") is not None:
@@ -196,7 +206,7 @@ def _fallback_answer(question: str, context: dict) -> str:
             bits.append(f"avg sentiment {data['mean_sentiment']:+.2f}")
         if data.get("ml_next_day_direction"):
             bits.append(f"model leans {data['ml_next_day_direction']} ({data['ml_probability_up']:.0%} confidence)")
-        lines.append(f"- {display_symbol(symbol)}: " + ", ".join(bits))
+        lines.append(f"- {symbol}: " + ", ".join(bits))
     return "\n".join(lines)
 
 

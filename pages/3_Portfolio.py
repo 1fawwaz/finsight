@@ -40,13 +40,13 @@ def _load_history(symbol: str) -> pd.DataFrame:
 def _ensure_ingested(symbol: str) -> bool:
     if not _load_history(symbol).empty:
         return True
-    with st.spinner(f"Fetching {symbol} from Yahoo Finance..."):
+    with st.spinner(f"Fetching {display_symbol(symbol)} from Yahoo Finance..."):
         try:
             ingest_ticker(symbol)
             _load_history.clear()
             return True
         except IngestionError as exc:
-            st.warning(f"Couldn't fetch {symbol}: {exc}")
+            st.warning(f"Couldn't fetch {display_symbol(symbol)}: {exc}")
             return False
 
 

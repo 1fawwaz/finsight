@@ -10,7 +10,7 @@ from core.data_ingestion import IngestionError, ingest_ticker
 from core.explain import explain_sentiment
 from core.queries import get_price_history
 from core.sentiment import analyze_ticker_sentiment, get_stored_sentiment
-from core.ui_components import render_ai_panel, render_explanation, render_mode_toggle, stock_picker
+from core.ui_components import display_symbol, render_ai_panel, render_explanation, render_mode_toggle, stock_picker
 
 logger = get_logger(__name__)
 
@@ -36,19 +36,19 @@ with col_symbol:
     symbol = stock_picker("sentiment_symbol", default_symbol=DEFAULT_TICKERS[0])
 
 if _load_history(symbol).empty:
-    with st.spinner(f"Fetching {symbol} from Yahoo Finance..."):
+    with st.spinner(f"Fetching {display_symbol(symbol)} from Yahoo Finance..."):
         try:
             ingest_ticker(symbol)
             _load_history.clear()
         except IngestionError as exc:
-            st.warning(f"Couldn't fetch {symbol}: {exc}")
+            st.warning(f"Couldn't fetch {display_symbol(symbol)}: {exc}")
             st.stop()
 
 with col_action:
     st.write("")
     st.write("")
     if st.button("Analyze Sentiment", use_container_width=True):
-        with st.spinner(f"Fetching and scoring recent news for {symbol}..."):
+        with st.spinner(f"Fetching and scoring recent news for {display_symbol(symbol)}..."):
             new_rows = analyze_ticker_sentiment(symbol)
         if new_rows:
             st.success(f"Scored {len(new_rows)} new article(s).")
@@ -104,14 +104,14 @@ else:
 
     st.divider()
     sentiment_ai_data = {
-        "symbol": symbol,
+        "symbol": display_symbol(symbol),
         "num_articles": len(stored),
         "mean_sentiment": round(float(sentiment_df["sentiment"].mean()), 2),
         "positive_count": int((sentiment_df["sentiment"] > 0.1).sum()),
         "negative_count": int((sentiment_df["sentiment"] < -0.1).sum()),
         "recent_headlines": [r["headline"] for r in sorted(stored, key=lambda r: r["date"], reverse=True)[:5]],
     }
-    render_ai_panel(f"News sentiment for {symbol}", sentiment_ai_data, overall.simple if mode == "Simple" else overall.professional, mode)
+    render_ai_panel(f"News sentiment for {display_symbol(symbol)}", sentiment_ai_data, overall.simple if mode == "Simple" else overall.professional, mode)
 
 st.divider()
 st.caption("FinSight is a signal-research and education tool. Nothing shown here is financial advice.")
