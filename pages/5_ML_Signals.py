@@ -1,0 +1,147 @@
+"""ML Signals: walk-forward-backtested direction classifier with honest accuracy reporting."""
+
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+
+from core import theme
+from core.backtester import walk_forward_backtest
+from core.config import DEFAULT_TICKERS, UNSUPPORTED_MARKET_MESSAGE, get_logger, is_supported_symbol
+from core.data_ingestion import IngestionError, ingest_ticker
+from core.ml_model import make_dataset
+from core.queries import get_price_history, list_ticker_symbols
+from core.sentiment import get_stored_sentiment
+
+logger = get_logger(__name__)
+
+st.set_page_config(page_title="FinSight | ML Signals", page_icon="\U0001F4C8", layout="wide")
+st.title("ML Signals")
+
+st.warning(
+    "**This is not trading advice.** A realistic direction classifier on daily equity data "
+    "typically lands around **52-58% accuracy** — barely better than a coin flip. Treat every "
+    "number on this page as a research signal, not a recommendation to trade."
+)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _available_symbols() -> list[str]:
+    symbols = list_ticker_symbols()
+    return symbols or list(DEFAULT_TICKERS)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _load_history(symbol: str) -> pd.DataFrame:
+    return get_price_history(symbol)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _load_sentiment_series(symbol: str) -> pd.Series | None:
+    rows = get_stored_sentiment(symbol)
+    if not rows:
+        return None
+    sent_df = pd.DataFrame(rows)
+    sent_df["date"] = pd.to_datetime(sent_df["date"])
+    return sent_df.groupby("date")["sentiment"].mean()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _run_backtest(symbol: str, train_window: int, test_window: int):
+    history = _load_history(symbol)
+    sentiment_series = _load_sentiment_series(symbol)
+    features, labels = make_dataset(history, sentiment_by_date=sentiment_series)
+    return walk_forward_backtest(features, labels, history["close"], train_window=train_window, test_window=test_window)
+
+
+typed = st.text_input("Ticker symbol", placeholder="e.g. RELIANCE.NS").strip().upper()
+symbol = typed if typed else st.selectbox("...or pick from the database", _available_symbols())
+
+if not is_supported_symbol(symbol):
+    st.warning(UNSUPPORTED_MARKET_MESSAGE)
+    st.stop()
+
+if _load_history(symbol).empty:
+    with st.spinner(f"Fetching {symbol} from Yahoo Finance..."):
+        try:
+            ingest_ticker(symbol)
+            _load_history.clear()
+        except IngestionError as exc:
+            st.warning(f"Couldn't fetch {symbol}: {exc}")
+            st.stop()
+
+history = _load_history(symbol)
+years_available = (history.index[-1] - history.index[0]).days / 365.25
+if years_available < 1.5:
+    st.warning(f"Only {years_available:.1f} years of history for {symbol} — results below may be unreliable.")
+
+if st.button("Run Walk-Forward Backtest"):
+    with st.spinner(f"Training and backtesting on {symbol} (this walks forward year by year, so it takes a bit)..."):
+        try:
+            result = _run_backtest(symbol, train_window=252, test_window=21)
+            st.session_state["ml_result"] = result
+            st.session_state["ml_symbol"] = symbol
+        except ValueError as exc:
+            st.warning(str(exc))
+            st.stop()
+
+if st.session_state.get("ml_symbol") != symbol:
+    st.caption("Click **Run Walk-Forward Backtest** to train and evaluate a model for this ticker.")
+    st.stop()
+
+result = st.session_state["ml_result"]
+
+st.divider()
+st.subheader("Honest Performance")
+metric_cols = st.columns(4)
+metric_cols[0].metric("Accuracy", f"{result.accuracy:.1%}")
+metric_cols[1].metric("Precision", f"{result.precision:.1%}")
+metric_cols[2].metric("Recall", f"{result.recall:.1%}")
+metric_cols[3].metric("Out-of-sample days", f"{len(result.predictions):,}")
+
+col_confusion, col_equity = st.columns(2)
+
+with col_confusion:
+    st.subheader("Confusion Matrix")
+    fig = go.Figure(
+        go.Heatmap(
+            z=result.confusion,
+            x=["Predicted Down", "Predicted Up"],
+            y=["Actual Down", "Actual Up"],
+            colorscale=theme.SEQUENTIAL_BLUE,
+            text=result.confusion,
+            texttemplate="%{text}",
+        )
+    )
+    fig.update_layout(margin=dict(t=10, l=10, r=10, b=10), height=350, yaxis_autorange="reversed")
+    st.plotly_chart(fig, use_container_width=True)
+
+with col_equity:
+    st.subheader("Equity Curve: Signal vs Buy & Hold")
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=result.equity_signal.index,
+            y=result.equity_signal,
+            name="Signal-following",
+            line=dict(color=theme.CATEGORICAL[0], width=2),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=result.equity_buy_hold.index,
+            y=result.equity_buy_hold,
+            name="Buy & Hold",
+            line=dict(color=theme.INK_MUTED, width=2, dash="dot"),
+        )
+    )
+    fig.update_layout(
+        yaxis_title="Growth of ₹1",
+        plot_bgcolor="white",
+        margin=dict(t=10, l=10, r=10, b=10),
+        height=350,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
+st.caption("FinSight is a signal-research and education tool. Nothing shown here is financial advice.")

@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+.env
+data/
+.git/
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+streamlit_log.txt
