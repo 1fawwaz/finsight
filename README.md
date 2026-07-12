@@ -17,18 +17,25 @@ technical depth.
   and AI explanation between kid-friendly plain language (no jargon, everyday analogies)
   and full technical depth (RSI, MACD, ATR, ADX, VWAP, Sharpe ratio, etc.). Both modes
   read from the same underlying numbers.
+- **NSE holiday calendar** — the app always knows the current IST session (pre-open,
+  open, post-close, closed), today's holiday if it's one, and the next/previous trading
+  day. Predictions and copy say "next trading session" with the real date, never a
+  hardcoded "tomorrow" that could land on a weekend or exchange holiday.
 - **Market Overview** — a DB-persisted watchlist (shared across the whole app, not
-  per-session) with live price/RSI, sector heatmap, top movers, NSE market-hours status (IST).
+  per-session) with live price/RSI, sector/name filters, CSV export, 52-week range,
+  sector heatmap, top movers, volume leaders, and NSE market-hours status (IST).
 - **Stock Analysis** — candlestick charts with SMA/EMA/Bollinger/VWAP/Support-Resistance
   overlays, RSI + MACD subplots, and an AI-narrated analysis panel.
-- **Portfolio** — CRUD holdings (via the same universal search), allocation pie,
-  cumulative return vs Nifty 50/Sensex, Sharpe ratio, max drawdown, correlation matrix.
+- **Portfolio** — CRUD holdings (via the same universal search, plus CSV import/export),
+  allocation pie, sector allocation, a diversification score, a risk meter, cumulative
+  return vs Nifty 50/Sensex, Sharpe ratio, max drawdown, correlation matrix, and a
+  bootstrap Monte Carlo simulation (5th-95th percentile fan chart) of future portfolio value.
 - **AI Sentiment** — Gemini-scored news sentiment per ticker (real SQLite UPSERT, no
   duplicate writes), with a rule-based keyword fallback when no API key is configured.
-- **ML Signals** — a genuine next-day "Tomorrow's Guess" prediction (not just historical
-  backtest numbers), plus a walk-forward-backtested RandomForest classifier with
-  honestly reported accuracy/precision/recall, confusion matrix, and equity curve vs
-  buy-and-hold.
+- **ML Signals** — a genuine next-trading-session "Guess" prediction, calendar-aware
+  (not just historical backtest numbers), plus a walk-forward-backtested RandomForest
+  classifier with honestly reported accuracy/precision/recall, confusion matrix, and
+  equity curve vs buy-and-hold.
 - **Ask FinSight AI** — a chat grounded in the app's own data (prices, indicators,
   portfolio, sentiment, ML outputs), not generic LLM knowledge.
 - **AI explanation panels** — every analytical page has a "What the AI Thinks" panel:
@@ -76,7 +83,7 @@ core/
   market_summary.py       AI-narrated home-dashboard market summary, with fallback
   chat.py                 "Ask FinSight AI": entity extraction + grounded Q&A
   formatting.py           Indian Rupee (₹) digit-grouped formatting
-  market_status.py        NSE open/closed status in IST
+  market_status.py        NSE session status, holiday calendar, next/previous trading day (IST)
   theme.py                Shared Plotly color constants + dark chart layout helper
 tests/                    pytest suite (84%+ coverage on core/)
 data/                     SQLite DB (gitignored)
@@ -119,9 +126,11 @@ docker run -p 8501:8501 --env-file .env -v $(pwd)/data:/app/data finsight
 pytest --cov=core --cov-report=term-missing
 ```
 
-84%+ coverage on `core/`, including a dedicated lookahead-bias regression test for the
-ML feature pipeline and a race-condition test proving the news-sentiment UPSERT is
-actually atomic.
+87%+ coverage on `core/` (212 tests), including a dedicated lookahead-bias regression
+test for the ML feature pipeline, race-condition tests proving the news-sentiment and
+Ticker-creation UPSERTs are actually atomic, and regression tests for universal-search
+false positives (e.g. a bare 5-6 character foreign ticker guess silently resolving to
+an unrelated NSE company by coincidental fuzzy-match score).
 
 ## Disclaimer
 
