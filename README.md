@@ -36,8 +36,15 @@ technical depth.
   (not just historical backtest numbers), plus a walk-forward-backtested RandomForest
   classifier with honestly reported accuracy/precision/recall, confusion matrix, and
   equity curve vs buy-and-hold.
-- **Ask FinSight AI** — a chat grounded in the app's own data (prices, indicators,
-  portfolio, sentiment, ML outputs), not generic LLM knowledge.
+- **Ask FinSight AI** — a real analyst pipeline, not a chatbot glued to an LLM: intent
+  detection routes each question (single stock, comparison, portfolio review, market
+  overview, indicator explainer, sector query) through calendar-aware live price,
+  technical, fundamental, news-sentiment, ML-prediction, and portfolio context before
+  Gemini ever sees it. Conversation memory resolves short follow-ups ("What about
+  Infosys?", "Which one is safer?") without repeating context. Every response carries
+  the real current IST date/time/session status and the actual next-trading-session
+  date — never a hardcoded "tomorrow". The rule-based fallback is fully structured
+  (not a one-line data dump), so answers are never generic even without Gemini.
 - **AI explanation panels** — every analytical page has a "What the AI Thinks" panel:
   Gemini synthesizes that page's own computed numbers into a short narrative, with a
   rule-based fallback that's never blank.
@@ -81,7 +88,9 @@ core/
   explain.py              Plain-language (Simple) and technical (Professional) explanations
   ai_explain.py           Gemini-narrated "AI Analysis" panel, per-page, with fallback
   market_summary.py       AI-narrated home-dashboard market summary, with fallback
-  chat.py                 "Ask FinSight AI": entity extraction + grounded Q&A
+  fundamentals.py         Cached P/E, dividend rate, market cap, 52-week range (yfinance)
+  chat.py                 "Ask FinSight AI": intent detection, conversation memory,
+                           calendar-aware grounded Q&A, structured fallback
   formatting.py           Indian Rupee (₹) digit-grouped formatting
   market_status.py        NSE session status, holiday calendar, next/previous trading day (IST)
   theme.py                Shared Plotly color constants + dark chart layout helper
@@ -126,7 +135,7 @@ docker run -p 8501:8501 --env-file .env -v $(pwd)/data:/app/data finsight
 pytest --cov=core --cov-report=term-missing
 ```
 
-87%+ coverage on `core/` (212 tests), including a dedicated lookahead-bias regression
+88%+ coverage on `core/` (252 tests), including a dedicated lookahead-bias regression
 test for the ML feature pipeline, race-condition tests proving the news-sentiment and
 Ticker-creation UPSERTs are actually atomic, and regression tests for universal-search
 false positives (e.g. a bare 5-6 character foreign ticker guess silently resolving to
