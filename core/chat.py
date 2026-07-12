@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from core.config import BENCHMARK_NIFTY50, BENCHMARK_SENSEX, GEMINI_API_KEY, get_logger
+from core.config import BENCHMARK_NIFTY50, BENCHMARK_SENSEX, GEMINI_API_KEY, GEMINI_TIMEOUT_SECONDS, get_logger
 from core.indicators import macd, rsi, volatility
 from core.ml_model import predict_next_direction
 from core.portfolio import list_holdings, list_portfolios
@@ -232,7 +232,7 @@ def _gemini_answer(question: str, context: dict, mode: str) -> str:
         f"{style} Keep it under 100 words. Never give direct buy/sell orders -- frame "
         "everything as informational, and end with a brief reminder this isn't financial advice."
     )
-    response = model.generate_content(prompt)
+    response = model.generate_content(prompt, request_options={"timeout": GEMINI_TIMEOUT_SECONDS})
     text = (response.text or "").strip()
     if not text:
         raise ValueError("Gemini returned an empty chat answer")

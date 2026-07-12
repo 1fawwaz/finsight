@@ -15,6 +15,12 @@ DATA_DIR.mkdir(exist_ok=True)
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{(DATA_DIR / 'finsight.db').as_posix()}")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
+# Every Gemini call site passes this as its request timeout. Measured Gemini latency can
+# exceed the Phase 0 "AI response under 8s" budget on a slow connection; without a
+# client-side timeout, google-generativeai blocks indefinitely and the UI just hangs on
+# a spinner instead of falling back to the always-available rule-based path.
+GEMINI_TIMEOUT_SECONDS = 8
+
 DEFAULT_TICKERS: list[str] = [
     "RELIANCE.NS",
     "TCS.NS",

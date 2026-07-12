@@ -8,7 +8,7 @@ fallback is never blank.
 
 from __future__ import annotations
 
-from core.config import GEMINI_API_KEY, get_logger
+from core.config import GEMINI_API_KEY, GEMINI_TIMEOUT_SECONDS, get_logger
 
 logger = get_logger(__name__)
 
@@ -42,7 +42,9 @@ def _gemini_panel_for_mode(context_label: str, data: dict, mode: str) -> str:
 
     genai.configure(api_key=GEMINI_API_KEY)
     model = genai.GenerativeModel(MODEL_NAME)
-    response = model.generate_content(_build_prompt(context_label, data, mode))
+    response = model.generate_content(
+        _build_prompt(context_label, data, mode), request_options={"timeout": GEMINI_TIMEOUT_SECONDS}
+    )
     text = (response.text or "").strip()
     if not text:
         raise ValueError("Gemini returned an empty AI panel response")

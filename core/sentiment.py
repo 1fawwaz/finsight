@@ -12,7 +12,7 @@ import yfinance as yf
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from core.config import GEMINI_API_KEY, get_logger
+from core.config import GEMINI_API_KEY, GEMINI_TIMEOUT_SECONDS, get_logger
 from core.database import NewsSentiment, Ticker, get_session
 
 logger = get_logger(__name__)
@@ -114,7 +114,11 @@ def gemini_sentiment(text: str) -> SentimentResult:
         '{"sentiment": <float from -1 to 1>, "confidence": <float from 0 to 1>, "rationale": "<one sentence>"}.\n\n'
         f"Text: {text}"
     )
-    response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
+    response = model.generate_content(
+        prompt,
+        generation_config={"response_mime_type": "application/json"},
+        request_options={"timeout": GEMINI_TIMEOUT_SECONDS},
+    )
     data = json.loads(response.text)
     return SentimentResult(
         sentiment=max(-1.0, min(1.0, float(data["sentiment"]))),

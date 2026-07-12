@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from core.config import GEMINI_API_KEY, get_logger
+from core.config import GEMINI_API_KEY, GEMINI_TIMEOUT_SECONDS, get_logger
 
 logger = get_logger(__name__)
 
@@ -73,7 +73,7 @@ def _gemini_summary(snapshot: MarketSnapshot) -> str:
         f"Top watchlist gainer (symbol, change): {snapshot.top_gainer}\n"
         f"Top watchlist loser (symbol, change): {snapshot.top_loser}\n"
     )
-    response = model.generate_content(prompt)
+    response = model.generate_content(prompt, request_options={"timeout": GEMINI_TIMEOUT_SECONDS})
     text = (response.text or "").strip()
     if not text:
         raise ValueError("Gemini returned an empty market summary")
