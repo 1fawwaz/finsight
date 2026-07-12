@@ -33,9 +33,11 @@ technical depth.
 - **AI Sentiment** — Gemini-scored news sentiment per ticker (real SQLite UPSERT, no
   duplicate writes), with a rule-based keyword fallback when no API key is configured.
 - **ML Signals** — a genuine next-trading-session "Guess" prediction, calendar-aware
-  (not just historical backtest numbers), plus a walk-forward-backtested RandomForest
-  classifier with honestly reported accuracy/precision/recall, confusion matrix, and
-  equity curve vs buy-and-hold.
+  (not just historical backtest numbers), plus a walk-forward-backtested classifier with
+  honestly reported accuracy/precision/recall, confusion matrix, and equity curve vs
+  buy-and-hold. The live prediction prefers a registered model from the Phase 3
+  production ML pipeline (`core/ml/`, below) when one exists, falling back to the
+  original in-app RandomForest otherwise -- see "Production ML Pipeline" below.
 - **Ask FinSight AI** — a real analyst pipeline, not a chatbot glued to an LLM: intent
   detection routes each question (single stock, comparison, portfolio review, market
   overview, indicator explainer, sector query) through calendar-aware live price,
@@ -83,7 +85,9 @@ core/
                            Support/Resistance, volatility, returns
   portfolio.py            Weights, Sharpe, max drawdown, correlation, holdings CRUD
   sentiment.py            Gemini sentiment scoring + rule-based fallback
-  ml_model.py             Feature engineering + RandomForest classifier + next-day prediction
+  ml_model.py             Feature engineering + RandomForest classifier + next-day
+                           prediction; prefers a registered Phase 3 model when active
+  ml/                      Production ML pipeline (see below)
   backtester.py           Walk-forward backtest
   explain.py              Plain-language (Simple) and technical (Professional) explanations
   ai_explain.py           Gemini-narrated "AI Analysis" panel, per-page, with fallback
@@ -94,13 +98,54 @@ core/
   formatting.py           Indian Rupee (₹) digit-grouped formatting
   market_status.py        NSE session status, holiday calendar, next/previous trading day (IST)
   theme.py                Shared Plotly color constants + dark chart layout helper
-tests/                    pytest suite (84%+ coverage on core/)
+tests/                    pytest suite (91%+ coverage on core/)
 data/                     SQLite DB (gitignored)
 .streamlit/config.toml    Dark theme + error-detail suppression
 ```
 
 The database is SQLite by default (`data/finsight.db`); swapping to PostgreSQL only
 requires changing `DATABASE_URL`.
+
+## Production ML Pipeline (`core/ml/`)
+
+A versioned, reproducible pipeline for the next-trading-session direction classifier,
+built on top of (not duplicating) the existing price-ingestion and feature code:
+
+```
+core/ml/
+  data_layer.py           Dataset versioning (ml_dataset_versions) + quality validation
+                           (schema/range/duplicate/outlier checks) on top of the
+                           existing incremental yfinance ingestion, with retries
+  feature_pipeline.py     27-feature extended set (core.ml_model's 9 + 18 more reusing
+                           core.indicators: ATR, ADX, VWAP, Bollinger, SMA/EMA distance,
+                           ROC, momentum, volume ratio, gap %, candle anatomy,
+                           support/resistance and 52-week-range distance) + the SQLite
+                           feature store (ml_feature_sets / ml_feature_values)
+  cv.py                   Chronological train/val/test split + walk-forward CV by
+                           unique date, with an enforced no-leakage assertion per fold
+  baseline.py              Naive persistence baseline every model is measured against
+  training.py              Optuna-tuned training across CatBoost/XGBoost/LightGBM/
+                           RandomForest; every trial logged to ml_training_runs
+  generalization.py       The mandatory overfit/underfit/fold-instability gate +
+                           per-feature leakage audit
+  corrective_actions.py   Regularization / feature-selection / validation-targeted
+                           re-tune strategies for a model flagged by the gate
+  ensemble.py              Soft-voting ensemble (tried in the improvement loop)
+  registry.py              Model artifact + full-lineage persistence (ml_model_registry)
+  evaluation.py            Confusion matrix, learning curves, feature importance, SHAP
+                           -- generated and persisted (JSON + PNG) under data/ml_evaluation/
+  improvement_loop.py      Keep/revert decision rule + iteration logging
+                           (ml_improvement_iterations)
+```
+
+The currently active model is `finsight_direction_classifier_v1` (XGBoost): on the
+held-out, chronologically-final test fold it scores ROC-AUC 0.515 vs the naive baseline's
+~0.50 and the prior in-app RandomForest's 0.491 on the identical fold -- a real, if
+modest, improvement. It does **not** beat the naive baseline on raw accuracy at the
+default 0.5 threshold (47.6% vs 49.2%), which is disclosed rather than hidden: daily
+NSE-equity direction is close to a random walk at this granularity, consistent with
+published research. See `docs/phase3_evidence/` for the full training/gate/
+improvement-loop evidence behind this number.
 
 ## Setup
 
@@ -135,7 +180,7 @@ docker run -p 8501:8501 --env-file .env -v $(pwd)/data:/app/data finsight
 pytest --cov=core --cov-report=term-missing
 ```
 
-88%+ coverage on `core/` (252 tests), including a dedicated lookahead-bias regression
+91%+ coverage on `core/` (346 tests), including a dedicated lookahead-bias regression
 test for the ML feature pipeline, race-condition tests proving the news-sentiment and
 Ticker-creation UPSERTs are actually atomic, and regression tests for universal-search
 false positives (e.g. a bare 5-6 character foreign ticker guess silently resolving to
