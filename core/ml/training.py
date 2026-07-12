@@ -41,7 +41,7 @@ DEFAULT_N_TRIALS = 10
 DEFAULT_N_CV_FOLDS = 3
 
 
-def _build_model(family: str, params: dict):
+def build_model(family: str, params: dict):
     if family == "random_forest":
         from sklearn.ensemble import RandomForestClassifier
 
@@ -96,7 +96,7 @@ def _param_space(trial: optuna.Trial, family: str) -> dict:
     raise ValueError(f"Unknown model family: {family!r}. Must be one of {MODEL_FAMILIES}.")
 
 
-def _fit_with_early_stopping(family: str, model, X_train, y_train, X_val, y_val):
+def fit_with_early_stopping(family: str, model, X_train, y_train, X_val, y_val):
     """Fit `model`, using the fold's own validation split for early stopping where the
     library supports it (standard practice -- early stopping only decides *when to
     stop*, it never fits weights to the validation labels)."""
@@ -135,8 +135,8 @@ def evaluate_params_on_folds(
         X_train, y_train = features.loc[fold.train_index], labels.loc[fold.train_index]
         X_val, y_val = features.loc[fold.val_index], labels.loc[fold.val_index]
 
-        model = _build_model(family, params)
-        model = _fit_with_early_stopping(family, model, X_train, y_train, X_val, y_val)
+        model = build_model(family, params)
+        model = fit_with_early_stopping(family, model, X_train, y_train, X_val, y_val)
 
         preds = model.predict(X_val)
         proba = model.predict_proba(X_val)[:, 1]
