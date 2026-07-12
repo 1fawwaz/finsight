@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
 
 import joblib
 from sqlalchemy import select, update
@@ -65,7 +64,8 @@ def register_model(
     never deletes a prior entry, so registry history is never lost."""
     _validate_safe_identifier(model_name, "model_name")
     version = _next_model_version(model_name)
-    artifact_path = MODEL_ARTIFACT_DIR / f"{version}.joblib"
+    filename = f"{version}.joblib"
+    artifact_path = MODEL_ARTIFACT_DIR / filename
     joblib.dump(model, artifact_path)
 
     with get_session() as session:
@@ -79,7 +79,13 @@ def register_model(
             feature_version=feature_version,
             hyperparameters_json=json.dumps(hyperparameters),
             metrics_json=json.dumps(metrics),
-            artifact_path=str(artifact_path.resolve()),
+            # Stored as a bare filename, resolved against MODEL_ARTIFACT_DIR at load
+            # time -- not an absolute path. An absolute path baked in at registration
+            # time (e.g. a Windows host path) is meaningless in a different environment
+            # reading the same DB through a volume mount (e.g. the Linux container),
+            # even though the underlying file is identical on disk. Confirmed by an
+            # actual cross-environment failure during Docker end-to-end verification.
+            artifact_path=filename,
             git_commit_hash=_git_commit_hash(),
             is_active=activate,
         )
@@ -95,7 +101,7 @@ def load_model_by_version(version: str):
         entry = session.execute(select(MLModelRegistry).where(MLModelRegistry.version == version)).scalar_one_or_none()
         if entry is None:
             raise ValueError(f"No model version {version!r} in the registry.")
-        artifact_path = Path(entry.artifact_path)
+        artifact_path = MODEL_ARTIFACT_DIR / entry.artifact_path
     if not artifact_path.exists():
         raise FileNotFoundError(f"Registry entry {version!r} exists but its artifact is missing: {artifact_path}")
     return joblib.load(artifact_path)
@@ -110,7 +116,7 @@ def get_active_model(model_name: str):
         ).scalar_one_or_none()
         if entry is None:
             return None, None
-        artifact_path = Path(entry.artifact_path)
+        artifact_path = MODEL_ARTIFACT_DIR / entry.artifact_path
     if not artifact_path.exists():
         raise FileNotFoundError(f"Active registry entry for {model_name!r} exists but its artifact is missing: {artifact_path}")
     return joblib.load(artifact_path), entry
