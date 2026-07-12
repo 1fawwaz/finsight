@@ -9,3 +9,4 @@ __pycache__/
 htmlcov/
 .streamlit/secrets.toml
 streamlit_log.txt
+catboost_info/

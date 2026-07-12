@@ -31,6 +31,19 @@ def _git_commit_hash() -> str | None:
     return None
 
 
+def _validate_safe_identifier(value: str, field_name: str) -> None:
+    """model_name/version are used to build filesystem paths under MODEL_ARTIFACT_DIR --
+    reject anything that could escape that directory (path separators, `..`, a null
+    byte) rather than trusting the caller. Currently every call site passes a
+    hardcoded or internally-generated string, but this is exactly the kind of value a
+    future REST API (a stated Future Scalability goal) would take from a request, so
+    it's validated here rather than assumed safe forever."""
+    if not value or not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a non-empty string.")
+    if any(bad in value for bad in ("/", "\\", "..", "\x00")):
+        raise ValueError(f"{field_name} contains unsafe path characters: {value!r}")
+
+
 def _next_model_version(model_name: str) -> str:
     with get_session() as session:
         count = len(session.execute(select(MLModelRegistry).where(MLModelRegistry.model_name == model_name)).scalars().all())
@@ -50,6 +63,7 @@ def register_model(
     """Serialize `model` to disk and persist its full lineage. If `activate`, marks this
     the active model for `model_name` and deactivates any prior active entry for it --
     never deletes a prior entry, so registry history is never lost."""
+    _validate_safe_identifier(model_name, "model_name")
     version = _next_model_version(model_name)
     artifact_path = MODEL_ARTIFACT_DIR / f"{version}.joblib"
     joblib.dump(model, artifact_path)

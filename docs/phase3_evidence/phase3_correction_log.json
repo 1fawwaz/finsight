@@ -1,0 +1,341 @@
+{
+  "random_forest": [
+    {
+      "attempt_number": 1,
+      "strategy": "hyperparameter regularize",
+      "params": {
+        "n_estimators": 136,
+        "max_depth": 3,
+        "min_samples_leaf": 50,
+        "max_features": "sqrt"
+      },
+      "feature_subset": null,
+      "passed": true,
+      "overfit": false,
+      "underfit": false,
+      "instability": false,
+      "train_metrics": {
+        "accuracy": 0.5400116579232243,
+        "precision": 0.5288241224452388,
+        "recall": 0.9377539411669105,
+        "f1": 0.676277543366151,
+        "roc_auc": 0.595566886604695
+      },
+      "val_metrics": {
+        "accuracy": 0.4853395061728395,
+        "precision": 0.48460565162378744,
+        "recall": 0.9111816019032514,
+        "f1": 0.6327092511013216,
+        "roc_auc": 0.48918279471231674
+      },
+      "test_metrics": {
+        "accuracy": 0.47984934086629,
+        "precision": 0.4698535745047373,
+        "recall": 0.879129734085415,
+        "f1": 0.6124052764524277,
+        "roc_auc": 0.5073861363343656
+      }
+    }
+  ],
+  "catboost": [
+    {
+      "attempt_number": 1,
+      "strategy": "hyperparameter deregularize",
+      "params": {
+        "iterations": 191,
+        "depth": 9,
+        "learning_rate": 0.1024932221692416,
+        "l2_leaf_reg": 1.0
+      },
+      "feature_subset": null,
+      "passed": true,
+      "overfit": false,
+      "underfit": false,
+      "instability": false,
+      "train_metrics": {
+        "accuracy": 0.5928053959530353,
+        "precision": 0.5797852179406191,
+        "recall": 0.7458150495693158,
+        "f1": 0.6524026158657947,
+        "roc_auc": 0.6441255720475773
+      },
+      "val_metrics": {
+        "accuracy": 0.5258487654320988,
+        "precision": 0.5096269554753309,
+        "recall": 0.6716891356066613,
+        "f1": 0.579541566883339,
+        "roc_auc": 0.5364673666624762
+      },
+      "test_metrics": {
+        "accuracy": 0.49416195856873824,
+        "precision": 0.47079037800687284,
+        "recall": 0.6623690572119258,
+        "f1": 0.5503850016739203,
+        "roc_auc": 0.5040218854393785
+      }
+    }
+  ],
+  "xgboost": [
+    {
+      "attempt_number": 1,
+      "strategy": "hyperparameter regularize",
+      "params": {
+        "n_estimators": 237,
+        "max_depth": 3,
+        "learning_rate": 0.019721610970574007,
+        "subsample": 0.6,
+        "colsample_bytree": 0.836965827544817,
+        "reg_lambda": 10.0
+      },
+      "feature_subset": null,
+      "passed": false,
+      "overfit": false,
+      "underfit": true,
+      "instability": false,
+      "train_metrics": {
+        "accuracy": 0.5295195270214006,
+        "precision": 0.521867663681419,
+        "recall": 0.9754591256297741,
+        "f1": 0.6799592160416903,
+        "roc_auc": 0.5671579470763295
+      },
+      "val_metrics": {
+        "accuracy": 0.49189814814814814,
+        "precision": 0.4886731391585761,
+        "recall": 0.9579698651863601,
+        "f1": 0.6472006429145459,
+        "roc_auc": 0.5133321139114784
+      },
+      "test_metrics": {
+        "accuracy": 0.4749529190207156,
+        "precision": 0.4685831622176591,
+        "recall": 0.91941982272361,
+        "f1": 0.6207834602829162,
+        "roc_auc": 0.49445740591096055
+      }
+    },
+    {
+      "attempt_number": 2,
+      "strategy": "feature selection (top 60% by |correlation|)",
+      "params": {
+        "n_estimators": 237,
+        "max_depth": 3,
+        "learning_rate": 0.019721610970574007,
+        "subsample": 0.6,
+        "colsample_bytree": 0.836965827544817,
+        "reg_lambda": 10.0
+      },
+      "feature_subset": [
+        "dist_from_52w_high",
+        "volume_zscore",
+        "upper_wick_pct",
+        "gap_pct",
+        "volume_ratio_5_20",
+        "lag_return_1",
+        "lower_wick_pct",
+        "volatility_20",
+        "dist_from_resistance",
+        "adx_14",
+        "bollinger_bandwidth",
+        "dist_from_52w_low",
+        "price_to_vwap",
+        "bollinger_pct_b",
+        "lag_return_5",
+        "macd_signal"
+      ],
+      "passed": false,
+      "overfit": false,
+      "underfit": true,
+      "instability": false,
+      "train_metrics": {
+        "accuracy": 0.5266050462153385,
+        "precision": 0.5202772963604853,
+        "recall": 0.9757841703234195,
+        "f1": 0.6786864861809755,
+        "roc_auc": 0.5648634568059119
+      },
+      "val_metrics": {
+        "accuracy": 0.49074074074074076,
+        "precision": 0.4881192106322996,
+        "recall": 0.9611419508326725,
+        "f1": 0.6474358974358975,
+        "roc_auc": 0.5057784509092339
+      },
+      "test_metrics": {
+        "accuracy": 0.47532956685499056,
+        "precision": 0.46895424836601307,
+        "recall": 0.9250604351329573,
+        "f1": 0.6223908918406073,
+        "roc_auc": 0.49339003199272385
+      }
+    },
+    {
+      "attempt_number": 3,
+      "strategy": "Optuna re-tune vs validation (regularize-biased)",
+      "params": {
+        "n_estimators": 87,
+        "max_depth": 3,
+        "learning_rate": 0.032481928697702896,
+        "subsample": 0.6197316968394073,
+        "colsample_bytree": 0.5312037280884873,
+        "reg_lambda": 7.33991780504304
+      },
+      "feature_subset": null,
+      "passed": true,
+      "overfit": false,
+      "underfit": false,
+      "instability": false,
+      "train_metrics": {
+        "accuracy": 0.5322674660671163,
+        "precision": 0.5236749116607774,
+        "recall": 0.9634324719648951,
+        "f1": 0.6785325931437074,
+        "roc_auc": 0.5740351179263925
+      },
+      "val_metrics": {
+        "accuracy": 0.4895833333333333,
+        "precision": 0.4873469387755102,
+        "recall": 0.9468675654242664,
+        "f1": 0.6434923201293452,
+        "roc_auc": 0.5101883291795535
+      },
+      "test_metrics": {
+        "accuracy": 0.47570621468926555,
+        "precision": 0.4691458929301185,
+        "recall": 0.9250604351329573,
+        "f1": 0.6225596529284165,
+        "roc_auc": 0.5149355415569185
+      }
+    }
+  ],
+  "lightgbm": [
+    {
+      "attempt_number": 1,
+      "strategy": "hyperparameter deregularize",
+      "params": {
+        "n_estimators": 343,
+        "max_depth": 10,
+        "learning_rate": 0.013940346079873234,
+        "num_leaves": 150,
+        "min_child_samples": 25
+      },
+      "feature_subset": null,
+      "passed": false,
+      "overfit": true,
+      "underfit": false,
+      "instability": false,
+      "train_metrics": {
+        "accuracy": 0.5624947955699892,
+        "precision": 0.540763580302893,
+        "recall": 0.9691207541036893,
+        "f1": 0.6941792782305006,
+        "roc_auc": 0.6580790147238142
+      },
+      "val_metrics": {
+        "accuracy": 0.4957561728395062,
+        "precision": 0.49022939677145283,
+        "recall": 0.9151467089611419,
+        "f1": 0.6384508990318118,
+        "roc_auc": 0.5093679005666736
+      },
+      "test_metrics": {
+        "accuracy": 0.4745762711864407,
+        "precision": 0.46791666666666665,
+        "recall": 0.9049153908138597,
+        "f1": 0.6168634990387256,
+        "roc_auc": 0.49989229382245237
+      }
+    },
+    {
+      "attempt_number": 2,
+      "strategy": "feature selection (top 60% by |correlation|)",
+      "params": {
+        "n_estimators": 343,
+        "max_depth": 10,
+        "learning_rate": 0.013940346079873234,
+        "num_leaves": 150,
+        "min_child_samples": 25
+      },
+      "feature_subset": [
+        "dist_from_52w_high",
+        "volume_zscore",
+        "upper_wick_pct",
+        "gap_pct",
+        "volume_ratio_5_20",
+        "lag_return_1",
+        "lower_wick_pct",
+        "volatility_20",
+        "dist_from_resistance",
+        "adx_14",
+        "bollinger_bandwidth",
+        "dist_from_52w_low",
+        "price_to_vwap",
+        "bollinger_pct_b",
+        "lag_return_5",
+        "macd_signal"
+      ],
+      "passed": false,
+      "overfit": true,
+      "underfit": false,
+      "instability": false,
+      "train_metrics": {
+        "accuracy": 0.5533349987509368,
+        "precision": 0.534964105291146,
+        "recall": 0.9809848854217454,
+        "f1": 0.692360633172746,
+        "roc_auc": 0.6549268000015985
+      },
+      "val_metrics": {
+        "accuracy": 0.4861111111111111,
+        "precision": 0.485480572597137,
+        "recall": 0.9413164155432197,
+        "f1": 0.6405828386400432,
+        "roc_auc": 0.5043041222218184
+      },
+      "test_metrics": {
+        "accuracy": 0.47306967984934084,
+        "precision": 0.4679902755267423,
+        "recall": 0.9307010475423045,
+        "f1": 0.6228093825829064,
+        "roc_auc": 0.48383979931318793
+      }
+    },
+    {
+      "attempt_number": 3,
+      "strategy": "Optuna re-tune vs validation (deregularize-biased)",
+      "params": {
+        "n_estimators": 382,
+        "max_depth": 8,
+        "learning_rate": 0.05618106695101677,
+        "num_leaves": 195,
+        "min_child_samples": 10
+      },
+      "feature_subset": null,
+      "passed": false,
+      "overfit": true,
+      "underfit": false,
+      "instability": false,
+      "train_metrics": {
+        "accuracy": 0.5610791906070447,
+        "precision": 0.5395444763271162,
+        "recall": 0.9778969608321144,
+        "f1": 0.6954059520369835,
+        "roc_auc": 0.6463572847311587
+      },
+      "val_metrics": {
+        "accuracy": 0.49228395061728397,
+        "precision": 0.4885654885654886,
+        "recall": 0.9318001586042823,
+        "f1": 0.6410256410256411,
+        "roc_auc": 0.5069745369225647
+      },
+      "test_metrics": {
+        "accuracy": 0.47947269303201506,
+        "precision": 0.47080745341614905,
+        "recall": 0.9161966156325544,
+        "f1": 0.6219912472647703,
+        "roc_auc": 0.5032799095496058
+      }
+    }
+  ]
+}

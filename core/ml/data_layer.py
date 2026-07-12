@@ -16,6 +16,7 @@ sufficient for exact reproducibility from metadata alone.
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
@@ -89,19 +90,36 @@ class DatasetQualityReport:
         )
 
 
+def _ingest_with_retry(symbol: str, period: str, max_attempts: int = 3, backoff_seconds: float = 1.0) -> int:
+    """ingest_ticker wrapped with retries for transient failures (network hiccups,
+    momentary yfinance rate-limit responses) -- a fixed short backoff between attempts,
+    not a tight retry loop that would hammer an already-struggling upstream."""
+    last_exc: IngestionError | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return ingest_ticker(symbol, period=period)
+        except IngestionError as exc:
+            last_exc = exc
+            if attempt < max_attempts:
+                logger.warning("Data layer: %s fetch failed (attempt %d/%d) -- %s. Retrying.", symbol, attempt, max_attempts, exc)
+                time.sleep(backoff_seconds * attempt)
+    raise last_exc  # all attempts exhausted -- surface the last real error to the caller
+
+
 def sync_universe(symbols: list[str], period: str = "5y") -> dict[str, int]:
     """Incrementally sync price history for `symbols` (idempotent -- only new dates are
-    inserted; a re-run does no redundant work). Returns {symbol: rows_inserted}, logging
-    and skipping (not raising for) any symbol that fails to fetch, per the "skip invalid
-    rows or symbols rather than silently training on them, and log what was skipped and
-    why" data-quality rule.
+    inserted; a re-run does no redundant work). Retries each symbol up to 3 times on a
+    transient fetch failure before giving up on it. Returns {symbol: rows_inserted},
+    logging and skipping (not raising for) any symbol that still fails after retries,
+    per the "skip invalid rows or symbols rather than silently training on them, and log
+    what was skipped and why" data-quality rule.
     """
     results: dict[str, int] = {}
     for symbol in symbols:
         try:
-            results[symbol] = ingest_ticker(symbol, period=period)
+            results[symbol] = _ingest_with_retry(symbol, period)
         except IngestionError as exc:
-            logger.warning("Data layer: skipping %s during sync -- %s", symbol, exc)
+            logger.warning("Data layer: skipping %s after retries exhausted -- %s", symbol, exc)
             results[symbol] = 0
     return results
 

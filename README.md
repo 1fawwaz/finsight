@@ -104,7 +104,7 @@ requires changing `DATABASE_URL`.
 
 ## Setup
 
-Requires Python 3.11+.
+Requires Python 3.12+ (the Phase 3 ML dependency `xgboost==3.3.0` requires it).
 
 ```bash
 python -m venv venv

@@ -6,12 +6,14 @@ from datetime import date, timedelta
 import pandas as pd
 import pytest
 
+from core.data_ingestion import IngestionError
 from core.database import MLDatasetVersion, Price, Ticker, get_session
 from core.ml.data_layer import (
     MIN_ROWS_FOR_TRAINING,
     create_dataset_version,
     get_dataset_version,
     load_dataset,
+    sync_universe,
     validate_symbol_history,
 )
 
@@ -155,3 +157,35 @@ def test_load_dataset_reproduces_the_same_rows(temp_db):
 def test_load_dataset_unknown_version_raises(temp_db):
     with pytest.raises(ValueError, match="No dataset version"):
         load_dataset("does_not_exist")
+
+
+def test_sync_universe_retries_transient_failure_then_succeeds(monkeypatch):
+    calls = {"n": 0}
+
+    def _flaky_ingest(symbol, period="5y"):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise IngestionError("simulated transient network failure")
+        return 42
+
+    monkeypatch.setattr("core.ml.data_layer.ingest_ticker", _flaky_ingest)
+    monkeypatch.setattr("core.ml.data_layer.time.sleep", lambda seconds: None)  # no real delay in tests
+
+    result = sync_universe(["FLAKY.NS"])
+    assert result == {"FLAKY.NS": 42}
+    assert calls["n"] == 3  # failed twice, succeeded on the 3rd attempt
+
+
+def test_sync_universe_gives_up_after_max_attempts_and_logs_not_raises(monkeypatch):
+    calls = {"n": 0}
+
+    def _always_fails(symbol, period="5y"):
+        calls["n"] += 1
+        raise IngestionError("permanently broken symbol")
+
+    monkeypatch.setattr("core.ml.data_layer.ingest_ticker", _always_fails)
+    monkeypatch.setattr("core.ml.data_layer.time.sleep", lambda seconds: None)
+
+    result = sync_universe(["BROKEN.NS"])
+    assert result == {"BROKEN.NS": 0}  # skipped, not raised
+    assert calls["n"] == 3  # exactly max_attempts, no more

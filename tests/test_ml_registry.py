@@ -88,3 +88,23 @@ def test_version_numbers_increment_per_model_name(temp_db, tmp_path, monkeypatch
     assert e1.version == "model_a_v1"
     assert e2.version == "model_b_v1"  # independent numbering per model_name
     assert e3.version == "model_a_v2"
+
+
+@pytest.mark.parametrize("malicious_name", ["../../etc/passwd", "..\\..\\windows\\system32", "a/b", "a\\b", "..", "\x00"])
+def test_register_model_rejects_path_traversal_in_model_name(temp_db, tmp_path, monkeypatch, malicious_name):
+    import core.ml.registry as registry_module
+
+    monkeypatch.setattr(registry_module, "MODEL_ARTIFACT_DIR", tmp_path)
+    with pytest.raises(ValueError, match="unsafe path characters|non-empty string"):
+        register_model(_FakeModel("x"), malicious_name, "xgboost", "ds", "fs", {}, {}, activate=False)
+
+    # Nothing should have been written outside (or inside) the artifact directory.
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_register_model_rejects_empty_model_name(temp_db, tmp_path, monkeypatch):
+    import core.ml.registry as registry_module
+
+    monkeypatch.setattr(registry_module, "MODEL_ARTIFACT_DIR", tmp_path)
+    with pytest.raises(ValueError, match="non-empty string"):
+        register_model(_FakeModel("x"), "", "xgboost", "ds", "fs", {}, {}, activate=False)
