@@ -4,6 +4,7 @@ from datetime import date
 
 import pandas as pd
 import pytest
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from core.data_ingestion import IngestionError, _validate_history, get_or_create_ticker, upsert_prices
 from core.database import Price, Ticker
@@ -66,6 +67,30 @@ def test_get_or_create_ticker_allows_benchmark_indices(db_session, monkeypatch):
     )
     ticker = get_or_create_ticker(db_session, "^NSEI")
     assert ticker.symbol == "^NSEI"
+
+
+def test_get_or_create_ticker_survives_a_race(db_session, monkeypatch):
+    """A genuine race: another caller creates the Ticker row for this exact symbol after
+    this call's own pre-check SELECT finds nothing, but before its own insert runs (e.g.
+    while it's still waiting on the yfinance metadata call). The DB-level
+    ON CONFLICT DO NOTHING must absorb that without raising IntegrityError, and the
+    concurrent insert -- not this call's -- must win, so there is still exactly one row."""
+
+    def _yfinance_call_races_a_concurrent_insert(symbol):
+        db_session.execute(
+            sqlite_insert(Ticker)
+            .values(symbol="RELIANCE.NS", name="Inserted By Concurrent Caller", sector="Energy")
+            .on_conflict_do_nothing(index_elements=["symbol"])
+        )
+        db_session.flush()
+        return type("T", (), {"info": {"shortName": "This Call's Own Name", "sector": "Energy"}})()
+
+    monkeypatch.setattr("core.data_ingestion.yf.Ticker", _yfinance_call_races_a_concurrent_insert)
+
+    ticker = get_or_create_ticker(db_session, "reliance.ns")  # must not raise IntegrityError
+
+    assert ticker.name == "Inserted By Concurrent Caller"
+    assert db_session.query(Ticker).filter(Ticker.symbol == "RELIANCE.NS").count() == 1
 
 
 def test_upsert_prices_inserts_new_rows(db_session):

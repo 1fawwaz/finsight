@@ -8,6 +8,7 @@ from typing import Optional
 import pandas as pd
 import yfinance as yf
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from core.config import DEFAULT_TICKERS, HISTORY_PERIOD, UNSUPPORTED_MARKET_MESSAGE, get_logger, is_supported_symbol
 from core.database import Price, Ticker, get_session, init_db
@@ -25,7 +26,15 @@ def get_or_create_ticker(session, symbol: str) -> Ticker:
 
     `symbol` may be a company name, bare ticker, or full `.NS`/`.BO` symbol -- it is
     resolved to a canonical symbol via `core.universe.resolve_symbol` first, so callers
-    never need to know or type the exchange suffix themselves.
+    never need to know or type the exchange suffix themselves. This is the single
+    creation path for every "add a stock" flow in the app (watchlist, portfolio,
+    sentiment, ML), which is what keeps the Ticker table a single source of truth
+    with no duplicate rows for the same symbol.
+
+    The create step is a real INSERT ... ON CONFLICT DO NOTHING (not a bare insert),
+    because two concurrent first-time adds of the same new symbol could otherwise both
+    pass the SELECT above before either commits, and a bare insert would then raise an
+    unhandled IntegrityError on the unique `symbol` constraint.
     """
     resolved = resolve_symbol(symbol.strip())
     symbol = (resolved or symbol).upper().strip()
@@ -44,10 +53,11 @@ def get_or_create_ticker(session, symbol: str) -> Ticker:
     except Exception as exc:  # yfinance/network errors shouldn't block ingestion
         logger.warning("Could not fetch metadata for %s: %s", symbol, exc)
 
-    ticker = Ticker(symbol=symbol, name=name, sector=sector)
-    session.add(ticker)
+    session.execute(
+        sqlite_insert(Ticker).values(symbol=symbol, name=name, sector=sector).on_conflict_do_nothing(index_elements=["symbol"])
+    )
     session.flush()
-    return ticker
+    return session.execute(select(Ticker).where(Ticker.symbol == symbol)).scalar_one()
 
 
 def _validate_history(symbol: str, history: pd.DataFrame) -> None:
