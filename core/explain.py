@@ -352,19 +352,29 @@ def explain_sentiment(score: float | None) -> Explanation:
     )
 
 
-def explain_ml_prediction(predicted_up: bool, probability: float, historical_accuracy: float) -> Explanation:
-    """ML direction prediction: what the model is guessing, and how much to trust it."""
+def explain_ml_prediction(
+    predicted_up: bool,
+    probability: float,
+    historical_accuracy: float,
+    target_session_label: str = "the next trading session",
+) -> Explanation:
+    """ML direction prediction: what the model is guessing, and how much to trust it.
+
+    `target_session_label` should name the actual next trading session (e.g. "Tuesday, 27
+    Jan") -- never "tomorrow", since tomorrow may be a weekend or exchange holiday.
+    """
     direction_word = "up" if predicted_up else "down"
     accuracy_out_of_10 = round(historical_accuracy * 10)
     simple = (
         f"Our computer looked at how this stock behaved before and thinks it's a little more "
-        f"likely to go {direction_word} tomorrow than the other way — but it's only been right "
-        f"about {accuracy_out_of_10} times out of 10 in the past, so this is a guess, not a promise."
+        f"likely to go {direction_word} in {target_session_label} than the other way — but it's only "
+        f"been right about {accuracy_out_of_10} times out of 10 in the past, so this is a guess, not a promise."
     )
     professional = (
-        f"Model predicts direction={direction_word} with probability {probability:.1%}. Historical "
-        f"walk-forward accuracy is {historical_accuracy:.1%} -- barely above chance for daily "
-        "equity direction, consistent with published research. Not a trading signal on its own."
+        f"Model predicts direction={direction_word} for {target_session_label} with probability "
+        f"{probability:.1%}. Historical walk-forward accuracy is {historical_accuracy:.1%} -- barely "
+        "above chance for daily equity direction, consistent with published research. Not a trading "
+        "signal on its own."
     )
     mood: Mood = "neutral"
     return Explanation(simple, professional, mood)

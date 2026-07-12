@@ -57,6 +57,9 @@ def _pct_change(close: pd.Series, periods: int = 1) -> float | None:
 status = get_nse_market_status()
 status_color = "green" if status.is_open else "gray"
 st.caption(f":{status_color}[● {status.label}] · {status.current_time_ist.strftime('%d %b %Y, %H:%M')} IST")
+if not status.is_open:
+    next_session_label = "today" if status.next_trading_day == status.current_time_ist.date() else status.next_trading_day.strftime("%A, %d %b")
+    st.caption(f"Next trading session: {next_session_label}")
 
 index_cols = st.columns(3)
 index_specs = [("Nifty 50", BENCHMARK_NIFTY50), ("Sensex", BENCHMARK_SENSEX), ("Bank Nifty", BENCHMARK_BANKNIFTY)]

@@ -9,6 +9,7 @@ from core.backtester import walk_forward_backtest
 from core.config import DEFAULT_TICKERS, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
 from core.explain import explain_ml_prediction
+from core.market_status import prediction_target_session
 from core.ml_model import make_dataset, predict_next_direction
 from core.queries import get_price_history
 from core.sentiment import get_stored_sentiment
@@ -83,8 +84,12 @@ years_available = (history.index[-1] - history.index[0]).days / 365.25
 if years_available < 1.5:
     st.warning(f"Only {years_available:.1f} years of history for {display_symbol(symbol)} — results below may be unreliable.")
 
+target_session = prediction_target_session()
+target_session_label = target_session.strftime("%A, %d %b")
+
 st.divider()
-st.subheader("Tomorrow's Guess" if mode == "Simple" else "Next-Day Prediction")
+st.subheader("Next Trading Session's Guess" if mode == "Simple" else "Next-Session Prediction")
+st.caption(f"Predicting for the next trading session: **{target_session_label}**.")
 next_prediction = _predict_next(symbol)
 if next_prediction is None:
     st.caption("Not enough history yet to make a prediction for this ticker.")
@@ -99,7 +104,10 @@ else:
         f"{probability_up:.0%} confidence" if mode == "Professional" else None,
     )
     with pred_cols[1]:
-        render_explanation(explain_ml_prediction(predicted_up, probability_up, historical_accuracy), mode)
+        render_explanation(
+            explain_ml_prediction(predicted_up, probability_up, historical_accuracy, target_session_label),
+            mode,
+        )
         if not has_backtest:
             st.caption(
                 "Run the backtest below to see exactly how often this model has been right for "
