@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 from rapidfuzz import fuzz
 
-from core.config import BENCHMARKS, is_supported_symbol, get_logger
+from core.config import BENCHMARKS, DEFAULT_TICKERS, is_supported_symbol, get_logger
 
 logger = get_logger(__name__)
 
@@ -133,18 +133,33 @@ def search_universe(query: str, limit: int = 8) -> list[UniverseEntry]:
 
     # Fall back to fuzzy matching on company name for typos / partial words not
     # covered by prefix/substring matching (e.g. "relaince", "hdfc bnk"). Skipped for
-    # short, single-token, all-alphabetic queries (e.g. "AAPL") -- those are
+    # short, single-token, all-alphabetic queries (e.g. "AAPL", "GOOGL") -- those are
     # indistinguishable from a deliberate (and possibly unsupported, e.g. a US ticker)
-    # bare-symbol guess, and short strings score misleadingly high against long
-    # company names under fuzzy matching, e.g. "AAPL" ~ "APL Apollo Tubes".
-    looks_like_bare_ticker_guess = bare_query.isalpha() and " " not in query and len(bare_query) <= 4
+    # bare-symbol guess, and short strings score misleadingly high against equally-short
+    # candidate name tokens under fuzzy matching, e.g. "AAPL" ~ "APL Apollo Tubes" or
+    # "GOOGL" ~ "GOCL" (GOCL Corporation) at a 66/100 ratio, comfortably past the
+    # threshold below despite being an unrelated company. The cutoff is 6, not 4,
+    # because that still comfortably excludes real fuzzy-typo cases this app explicitly
+    # supports (e.g. "relaince", 8 characters) while catching short tickers like
+    # "GOOGL"/"GOOGLE"/"AMZN"/"AMAZON" that would otherwise silently resolve to the
+    # wrong Indian stock instead of correctly reporting no match.
+    looks_like_bare_ticker_guess = bare_query.isalpha() and " " not in query and len(bare_query) <= 6
     if looks_like_bare_ticker_guess:
         return results
 
     seen_symbols = {r.symbol for r in results}
     query_tokens = bare_query.split()
     scored = universe["name_tokens"].map(lambda tokens: _best_token_match_score(query_tokens, tokens))
-    fuzzy_ranked = universe.assign(match_score=scored).sort_values("match_score", ascending=False)
+    # Ties are common: a one-word typo like "relaince" scores identically against every
+    # "Reliance ___" company (Industries, Power, Home Finance, ...), since name-string
+    # similarity alone can't tell them apart. With no market-cap/prominence data in the
+    # bundled universe, membership in the app's own curated large-cap list is the best
+    # available tiebreaker -- it's what keeps "relaince" resolving to RELIANCE.NS
+    # (Reliance Industries) instead of an arbitrary same-scoring smaller company.
+    is_default = universe["symbol"].isin(DEFAULT_TICKERS)
+    fuzzy_ranked = universe.assign(match_score=scored, is_default=is_default).sort_values(
+        ["match_score", "is_default"], ascending=[False, False]
+    )
     for row in fuzzy_ranked.itertuples(index=False):
         if row.match_score < _FUZZY_SCORE_THRESHOLD:
             break

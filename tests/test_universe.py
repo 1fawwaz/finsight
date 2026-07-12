@@ -73,6 +73,38 @@ def test_search_universe_rejects_short_bare_symbol_guess_like_us_tickers():
     assert search_universe("SPY") == []
 
 
+@pytest.mark.parametrize("query", ["GOOGL", "GOOGLE", "TSLA", "NVDA", "MSFT", "AMZN", "NFLX", "AMAZON"])
+def test_search_universe_rejects_longer_us_ticker_and_company_guesses(query):
+    # Regression: the length-4 cutoff above let 5-6 character foreign tickers/company
+    # names slip through to fuzzy matching and silently resolve to an unrelated NSE
+    # company purely by coincidental Levenshtein similarity, e.g. "GOOGL" ~ "GOCL
+    # Corporation" at 66/100 -- despite the two strings having no real relationship.
+    # A user typing one of these should see "no match", never a wrong company's data.
+    #
+    # ("META" is deliberately excluded here: it's a literal substring of "Alkali
+    # METAls Limited", so that match is intentional partial-match search behavior,
+    # not this bug -- see test_search_universe_partial_match_can_be_a_coincidental_substring.)
+    assert search_universe(query) == []
+
+
+def test_search_universe_partial_match_can_be_a_coincidental_substring():
+    # "META" legitimately substring-matches "Alkali Metals Limited" -- partial-match
+    # search is a deliberate feature, and the picker UI always shows the full company
+    # name before a user commits to a match, so this is expected, not a bug.
+    results = search_universe("META", limit=5)
+    assert any(r.symbol == "ALKALI.NS" for r in results)
+
+
+def test_search_universe_common_typo_ranks_the_flagship_company_first():
+    # Regression: "relaince" (typo of "Reliance") scored identically against every
+    # "Reliance ___" company (Industries, Power, Home Finance, ...), since name-string
+    # similarity alone can't distinguish them -- and an arbitrary tie order put Reliance
+    # Power ahead of Reliance Industries. The app's own curated large-cap list is used
+    # as a tiebreaker, so the well-known flagship company wins ties like this.
+    results = search_universe("relaince", limit=5)
+    assert results[0].symbol == "RELIANCE.NS"
+
+
 def test_search_universe_empty_query_returns_nothing():
     assert search_universe("") == []
     assert search_universe("   ") == []
@@ -104,6 +136,15 @@ def test_resolve_symbol_never_requires_user_to_type_suffix(user_text, expected):
 
 def test_resolve_symbol_returns_none_for_garbage_input():
     assert resolve_symbol("zzzznotarealcompanyzzzz123") is None
+
+
+def test_resolve_symbol_returns_none_for_foreign_ticker_guesses():
+    for query in ["GOOGL", "GOOGLE", "AMZN", "AMAZON"]:
+        assert resolve_symbol(query) is None
+
+
+def test_resolve_symbol_typo_resolves_to_flagship_company():
+    assert resolve_symbol("relaince") == "RELIANCE.NS"
 
 
 def test_resolve_symbol_empty_input_returns_none():
