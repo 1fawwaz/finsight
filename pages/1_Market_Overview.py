@@ -1,4 +1,5 @@
-"""Market Overview: watchlist table, sector heatmap, top movers."""
+"""Market Overview: filterable/exportable watchlist table with 52-week range, sector
+heatmap, top movers, and volume leaders."""
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -88,12 +89,15 @@ with col_remove:
 
 st.divider()
 
+TRADING_DAYS_52W = 252
+
 rows = []
 for symbol in watchlist_symbols:
     history = _load_history(symbol)
     if history.empty:
         continue
     close = history["close"]
+    window = history.tail(TRADING_DAYS_52W)
     info = _load_info(symbol) or {}
     latest_rsi = rsi(close, window=14).iloc[-1] if len(close) >= 15 else None
     rows.append(
@@ -105,6 +109,9 @@ for symbol in watchlist_symbols:
             "1D %": _pct_change(close, 1),
             "1W %": _pct_change(close, 5),
             "1M %": _pct_change(close, 21),
+            "Volume": int(history["volume"].iloc[-1]),
+            "52W Low": float(window["low"].min()),
+            "52W High": float(window["high"].max()),
             "RSI (14)" if mode == "Professional" else "Buying/Selling": _rsi_badge(latest_rsi, mode),
         }
     )
@@ -115,19 +122,47 @@ else:
     table_df = pd.DataFrame(rows)
 
     st.subheader("Watchlist")
-    display_df = table_df.copy()
-    display_df[["1D %", "1W %", "1M %"]] = display_df[["1D %", "1W %", "1M %"]] * 100
-    st.dataframe(
-        display_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Price": st.column_config.NumberColumn(format="₹%.2f"),
-            "1D %": st.column_config.NumberColumn(format="%.2f%%"),
-            "1W %": st.column_config.NumberColumn(format="%.2f%%"),
-            "1M %": st.column_config.NumberColumn(format="%.2f%%"),
-        },
-    )
+    filter_cols = st.columns([2, 2])
+    with filter_cols[0]:
+        sector_options = sorted(table_df["Sector"].unique().tolist())
+        sector_filter = st.multiselect("Filter by sector", options=sector_options, placeholder="All sectors")
+    with filter_cols[1]:
+        name_filter = st.text_input("Filter by symbol or name", placeholder="e.g. RELIANCE, Bank")
+
+    filtered_df = table_df.copy()
+    if sector_filter:
+        filtered_df = filtered_df[filtered_df["Sector"].isin(sector_filter)]
+    if name_filter.strip():
+        needle = name_filter.strip().lower()
+        filtered_df = filtered_df[
+            filtered_df["Symbol"].str.lower().str.contains(needle) | filtered_df["Name"].str.lower().str.contains(needle)
+        ]
+
+    if filtered_df.empty:
+        st.caption("No watchlist stocks match this filter.")
+    else:
+        display_df = filtered_df.copy()
+        display_df[["1D %", "1W %", "1M %"]] = display_df[["1D %", "1W %", "1M %"]] * 100
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Price": st.column_config.NumberColumn(format="₹%.2f"),
+                "1D %": st.column_config.NumberColumn(format="%.2f%%"),
+                "1W %": st.column_config.NumberColumn(format="%.2f%%"),
+                "1M %": st.column_config.NumberColumn(format="%.2f%%"),
+                "Volume": st.column_config.NumberColumn(format="%d"),
+                "52W Low": st.column_config.NumberColumn(format="₹%.2f"),
+                "52W High": st.column_config.NumberColumn(format="₹%.2f"),
+            },
+        )
+        st.download_button(
+            "Download CSV",
+            data=filtered_df.to_csv(index=False).encode("utf-8"),
+            file_name="finsight_watchlist.csv",
+            mime="text/csv",
+        )
 
     col_heatmap, col_movers = st.columns(2)
 
@@ -195,6 +230,31 @@ else:
                 yaxis=dict(autorange="reversed"),
             )
             st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+    st.subheader("Most Active" if mode == "Simple" else "Volume Leaders")
+    active_df = table_df.sort_values("Volume", ascending=False).head(10)
+    active_pct = active_df["1D %"].fillna(0) * 100
+    colors = [theme.STATUS_GOOD if v >= 0 else theme.STATUS_CRITICAL for v in active_pct]
+    fig = go.Figure(
+        go.Bar(
+            x=active_df["Volume"],
+            y=active_df["Symbol"],
+            orientation="h",
+            marker_color=colors,
+            text=[f"{v:,.0f}" for v in active_df["Volume"]],
+            textposition="outside",
+        )
+    )
+    theme.apply_dark_layout(
+        fig,
+        margin=dict(t=10, l=10, r=10, b=10),
+        height=380,
+        xaxis_title="Shares Traded (latest session)",
+        yaxis=dict(autorange="reversed"),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("Bars colored by 1-day price change; ranked by the most recently stored session's volume.")
 
 st.divider()
 st.caption("FinSight is a signal-research and education tool. Nothing shown here is financial advice.")
