@@ -4,7 +4,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.ml_model import build_features, build_labels, make_dataset, predict_next_direction, train_model
+from core.ml_model import (
+    REGISTRY_MODEL_NAME,
+    _predict_with_registry_model,
+    build_features,
+    build_labels,
+    make_dataset,
+    predict_next_direction,
+    train_model,
+)
 
 
 def _synthetic_price_df(n: int = 80, seed: int = 7) -> pd.DataFrame:
@@ -112,3 +120,55 @@ def test_predict_next_direction_uses_todays_row_not_seen_in_training():
 
     result = predict_next_direction(price_df)
     assert result is not None
+
+
+class _FakeRegistryModel:
+    """A stand-in for a registered model: fixed prediction, so tests can assert the
+    registry path (not the in-app RandomForest fallback) actually produced the result."""
+
+    def __init__(self, probability_up: float, feature_names: list[str] | None = None):
+        self.probability_up = probability_up
+        if feature_names is not None:
+            self.feature_names_in_ = feature_names
+
+    def predict_proba(self, X):
+        return np.array([[1 - self.probability_up, self.probability_up]] * len(X))
+
+
+def test_predict_with_registry_model_returns_none_when_none_registered(temp_db):
+    price_df = _synthetic_price_df(n=320)
+    assert _predict_with_registry_model(price_df, None) is None
+
+
+def test_predict_next_direction_prefers_registry_model_when_available(temp_db, tmp_path, monkeypatch):
+    import core.ml.registry as registry_module
+    from core.ml.feature_pipeline import build_features_v2
+    from core.ml.registry import register_model
+
+    monkeypatch.setattr(registry_module, "MODEL_ARTIFACT_DIR", tmp_path)
+    price_df = _synthetic_price_df(n=320)
+    feature_names = list(build_features_v2(price_df).columns)
+
+    # A fixed, obviously-distinguishable probability (0.9) the in-app RandomForest
+    # fallback would be extremely unlikely to independently produce on random data.
+    register_model(
+        _FakeRegistryModel(0.9, feature_names), REGISTRY_MODEL_NAME, "xgboost", "ds1", "fs1", {}, {}, activate=True
+    )
+
+    result = _predict_with_registry_model(price_df, None)
+    assert result == (True, 0.9)
+
+    full_result = predict_next_direction(price_df)
+    assert full_result == (True, 0.9)  # confirms predict_next_direction used the registry path, not the fallback
+
+
+def test_predict_with_registry_model_falls_back_gracefully_on_error(temp_db, monkeypatch):
+    def _raise(*args, **kwargs):
+        raise RuntimeError("simulated registry failure")
+
+    monkeypatch.setattr("core.ml.registry.get_active_model", _raise)
+    price_df = _synthetic_price_df(n=320)
+
+    assert _predict_with_registry_model(price_df, None) is None
+    # predict_next_direction must still return a real result via the fallback path.
+    assert predict_next_direction(price_df) is not None

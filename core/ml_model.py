@@ -15,9 +15,13 @@ from typing import Optional
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 
+from core.config import get_logger
 from core.indicators import macd, rsi, volatility
 
+logger = get_logger(__name__)
+
 RANDOM_STATE = 42
+REGISTRY_MODEL_NAME = "finsight_direction_classifier"
 
 
 def build_features(price_df: pd.DataFrame, sentiment_by_date: Optional[pd.Series] = None) -> pd.DataFrame:
@@ -81,16 +85,54 @@ def train_model(features: pd.DataFrame, labels: pd.Series) -> RandomForestClassi
     return model
 
 
+def _predict_with_registry_model(
+    price_df: pd.DataFrame, sentiment_by_date: Optional[pd.Series]
+) -> Optional[tuple[bool, float]]:
+    """Try the Phase 3 registered model (core.ml.registry) first -- on a fair,
+    identical held-out test fold it beat this module's in-app RandomForest (ROC-AUC
+    0.515 vs 0.491; see core/ml/registry.py's registration commit for the comparison).
+    Imports are deferred to the function body: core.ml.feature_pipeline imports
+    build_labels from this module, so a module-level import here would be circular.
+    Returns None (not an exception) on any failure, so the caller always has a working
+    fallback -- a registry/feature mismatch must never break a live prediction.
+    """
+    try:
+        from core.ml.feature_pipeline import build_features_v2
+        from core.ml.registry import get_active_model
+
+        model, _entry = get_active_model(REGISTRY_MODEL_NAME)
+        if model is None:
+            return None
+
+        latest_features = build_features_v2(price_df, sentiment_by_date).iloc[[-1]]
+        if hasattr(model, "feature_names_in_"):
+            latest_features = latest_features.reindex(columns=model.feature_names_in_)
+        if latest_features.isna().to_numpy().any():
+            return None
+
+        probability_up = float(model.predict_proba(latest_features)[0][1])
+        return probability_up >= 0.5, probability_up
+    except Exception as exc:  # registry/feature-pipeline errors must never break a live prediction
+        logger.warning("Registry model prediction unavailable, falling back to in-app RandomForest: %s", exc)
+        return None
+
+
 def predict_next_direction(
     price_df: pd.DataFrame, sentiment_by_date: Optional[pd.Series] = None
 ) -> Optional[tuple[bool, float]]:
-    """Train on all available labeled history and predict tomorrow's direction from today's
-    feature row -- the one row `make_dataset` always drops, since its label (tomorrow's
-    direction) doesn't exist yet. No lookahead: the model never sees today's own outcome.
+    """Predict the next trading session's direction. Prefers the Phase 3 registered
+    model (core.ml.registry) when one is active and its features compute cleanly for
+    this symbol; otherwise falls back to training an in-app RandomForest fresh on this
+    symbol's own history, exactly as before -- no registered model is required for this
+    function to work.
 
-    Returns (predicted_up, probability_up), or None if there's too little history to train
-    on or today's feature row isn't fully computable yet (e.g. NaN from a rolling warm-up).
+    Returns (predicted_up, probability_up), or None if there's too little history to
+    predict from, for either path.
     """
+    registry_result = _predict_with_registry_model(price_df, sentiment_by_date)
+    if registry_result is not None:
+        return registry_result
+
     features, labels = make_dataset(price_df, sentiment_by_date)
     if len(features) < 50:
         return None
