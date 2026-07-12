@@ -9,10 +9,12 @@ from core.explain import (
     explain_adx,
     explain_atr,
     explain_bollinger,
+    explain_diversification,
     explain_drawdown,
     explain_macd,
     explain_ml_prediction,
     explain_resistance,
+    explain_risk_level,
     explain_rsi,
     explain_sentiment,
     explain_sharpe,
@@ -149,6 +151,27 @@ def test_explain_drawdown_fraction_simile_scales_with_severity():
     assert "third" in explain_drawdown(-0.31).simple
     assert "more than a third" in explain_drawdown(-0.37).simple
     assert "about half" in explain_drawdown(-0.51).simple
+
+
+def test_explain_diversification_bands():
+    assert explain_diversification(80.0).mood == "good"
+    assert explain_diversification(30.0).mood == "worried"
+    assert explain_diversification(55.0).mood == "neutral"
+    assert explain_diversification(None).mood == "neutral"
+    _assert_no_jargon(explain_diversification(80.0).simple)
+
+
+def test_explain_risk_level_bands():
+    assert explain_risk_level("Low", 0.10).mood == "good"
+    assert explain_risk_level("Medium", 0.20).mood == "neutral"
+    assert explain_risk_level("High", 0.40).mood == "worried"
+    _assert_no_jargon(explain_risk_level("High", 0.40).simple)
+
+
+def test_explain_risk_level_handles_missing_volatility():
+    result = explain_risk_level("Medium", None)
+    assert isinstance(result, Explanation)
+    assert result.mood == "neutral"
 
 
 def test_explain_sentiment_positive_negative_neutral():

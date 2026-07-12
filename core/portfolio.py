@@ -1,6 +1,9 @@
-"""Portfolio math (weights, Sharpe, drawdown, correlation) and holdings CRUD."""
+"""Portfolio math (weights, Sharpe, drawdown, correlation, sector allocation,
+diversification, risk banding, Monte Carlo simulation) and holdings CRUD."""
 
 from __future__ import annotations
+
+import math
 
 import numpy as np
 import pandas as pd
@@ -61,6 +64,77 @@ def max_drawdown(close: pd.Series) -> float:
 def correlation_matrix(price_df: pd.DataFrame) -> pd.DataFrame:
     """Correlation matrix of daily returns across the given symbols' close price DataFrame."""
     return price_df.pct_change().dropna(how="all").corr()
+
+
+def sector_allocation(sector_by_symbol: dict[str, str | None], weights: dict[str, float]) -> dict[str, float]:
+    """Portfolio weight grouped by sector; symbols with no known sector group as 'Unknown'."""
+    allocation: dict[str, float] = {}
+    for symbol, weight in weights.items():
+        sector = sector_by_symbol.get(symbol) or "Unknown"
+        allocation[sector] = allocation.get(sector, 0.0) + weight
+    return allocation
+
+
+def diversification_score(weights: dict[str, float]) -> float:
+    """0-100 score from the Herfindahl-Hirschman Index of position weights.
+
+    100 means value is spread evenly across many positions; 0 means it's concentrated
+    entirely in one. HHI is the sum of squared weights (1.0 for a single full position,
+    1/n for n equally-weighted positions), so `(1 - HHI) * 100` rises toward 100 as the
+    portfolio spreads out and falls toward 0 as it concentrates.
+    """
+    values = [w for w in weights.values() if w > 0]
+    if not values:
+        return 0.0
+    hhi = sum(w**2 for w in values)
+    return float(round((1 - hhi) * 100, 1))
+
+
+def portfolio_volatility(daily_returns: pd.Series, annualize: bool = True) -> float:
+    """Standard deviation of portfolio daily returns, annualized by default."""
+    daily_returns = daily_returns.dropna()
+    if daily_returns.empty:
+        return 0.0
+    vol = float(daily_returns.std())
+    return vol * math.sqrt(TRADING_DAYS_PER_YEAR) if annualize else vol
+
+
+def risk_level(volatility_annualized: float) -> str:
+    """Coarse Low/Medium/High risk band from annualized volatility.
+
+    Thresholds are calibrated to typical NSE large/mid-cap equity portfolios, which
+    historically run roughly 15-35% annualized volatility.
+    """
+    if volatility_annualized < 0.15:
+        return "Low"
+    if volatility_annualized < 0.30:
+        return "Medium"
+    return "High"
+
+
+def monte_carlo_simulation(
+    daily_returns: pd.Series,
+    initial_value: float,
+    horizon_days: int = 252,
+    num_simulations: int = 500,
+    seed: int | None = 42,
+) -> pd.DataFrame:
+    """Simulate `num_simulations` future portfolio value paths over `horizon_days` trading
+    days by bootstrap-resampling (with replacement) from the portfolio's own historical
+    daily returns -- never an assumed or fabricated distribution.
+
+    Returns a DataFrame of shape (horizon_days + 1, num_simulations); row 0 is
+    `initial_value` for every column. Empty if there's no return history or a
+    non-positive starting value.
+    """
+    returns = daily_returns.dropna().to_numpy()
+    if returns.size == 0 or initial_value <= 0:
+        return pd.DataFrame()
+    rng = np.random.default_rng(seed)
+    sampled = rng.choice(returns, size=(horizon_days, num_simulations), replace=True)
+    growth = np.cumprod(1 + sampled, axis=0)
+    paths = np.vstack([np.ones((1, num_simulations)), growth]) * initial_value
+    return pd.DataFrame(paths)
 
 
 # --- Holdings CRUD -----------------------------------------------------------------

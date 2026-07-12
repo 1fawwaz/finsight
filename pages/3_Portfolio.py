@@ -1,4 +1,6 @@
-"""Portfolio: CRUD holdings, allocation, cumulative return vs an NSE benchmark, risk metrics, correlation."""
+"""Portfolio: CRUD holdings (with CSV import/export), allocation, sector allocation,
+diversification score, risk meter, cumulative return vs an NSE benchmark, risk metrics,
+correlation, and a bootstrap Monte Carlo simulation of future portfolio value."""
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -7,22 +9,28 @@ import streamlit as st
 from core import theme
 from core.config import BENCHMARKS, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
-from core.explain import explain_drawdown, explain_sharpe
+from core.explain import explain_diversification, explain_drawdown, explain_risk_level, explain_sharpe
 from core.formatting import format_inr
 from core.portfolio import (
     add_holding,
     correlation_matrix,
     create_portfolio,
     delete_holding,
+    diversification_score,
     list_holdings,
     list_portfolios,
     max_drawdown,
+    monte_carlo_simulation,
     portfolio_daily_returns,
+    portfolio_volatility,
     portfolio_weights,
+    risk_level,
+    sector_allocation,
     sharpe_ratio,
 )
-from core.queries import get_multi_symbol_close, get_price_history
+from core.queries import get_multi_symbol_close, get_price_history, get_ticker_info
 from core.ui_components import display_symbol, render_ai_panel, render_explanation, render_mode_toggle, stock_search_and_pick
+from core.universe import resolve_symbol
 
 logger = get_logger(__name__)
 
@@ -35,6 +43,11 @@ mode = render_mode_toggle()
 @st.cache_data(ttl=900, show_spinner=False)
 def _load_history(symbol: str) -> pd.DataFrame:
     return get_price_history(symbol)
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _load_info(symbol: str) -> dict | None:
+    return get_ticker_info(symbol)
 
 
 def _ensure_ingested(symbol: str) -> bool:
@@ -95,6 +108,46 @@ if add_clicked and match is not None:
             st.session_state.pop(widget_key, None)
         st.rerun()
 
+with st.expander("Import holdings from CSV"):
+    st.caption("Columns: Symbol, Shares, Avg Cost (Avg Cost is optional; Symbol accepts a company name, bare ticker, or full .NS/.BO symbol).")
+    uploaded_csv = st.file_uploader("Choose a CSV file", type="csv", key="portfolio_csv_uploader")
+    if uploaded_csv is not None and st.button("Import Holdings"):
+        try:
+            import_df = pd.read_csv(uploaded_csv)
+        except Exception as exc:
+            st.error(f"Couldn't read that CSV: {exc}")
+            import_df = None
+        if import_df is not None:
+            cols_lower = {c.lower().strip(): c for c in import_df.columns}
+            if not {"symbol", "shares"}.issubset(cols_lower.keys()):
+                st.error("CSV must have at least 'Symbol' and 'Shares' columns.")
+            else:
+                symbol_col, shares_col = cols_lower["symbol"], cols_lower["shares"]
+                cost_col = cols_lower.get("avg cost", cols_lower.get("avg_cost"))
+                imported, skipped = 0, []
+                for _, csv_row in import_df.iterrows():
+                    raw_symbol = str(csv_row[symbol_col]).strip()
+                    canonical = resolve_symbol(raw_symbol)
+                    shares_value = csv_row[shares_col]
+                    if not canonical or pd.isna(shares_value) or float(shares_value) <= 0:
+                        skipped.append(raw_symbol)
+                        continue
+                    cost_value = float(csv_row[cost_col]) if cost_col and pd.notna(csv_row.get(cost_col)) else 0.0
+                    try:
+                        if _ensure_ingested(canonical):
+                            add_holding(portfolio_id, canonical, float(shares_value), cost_value)
+                            imported += 1
+                        else:
+                            skipped.append(raw_symbol)
+                    except IngestionError:
+                        skipped.append(raw_symbol)
+                if imported:
+                    st.success(f"Imported {imported} holding(s).")
+                if skipped:
+                    st.warning(f"Skipped {len(skipped)} row(s) that couldn't be resolved: {', '.join(skipped)}")
+                if imported:
+                    st.rerun()
+
 holdings = list_holdings(portfolio_id)
 
 if not holdings:
@@ -137,6 +190,12 @@ st.dataframe(
         "Gain/Loss %": st.column_config.NumberColumn(format="%.2f%%"),
     },
 )
+st.download_button(
+    "Download Holdings CSV",
+    data=display_holdings_df.to_csv(index=False).encode("utf-8"),
+    file_name=f"finsight_{selected_name.replace(' ', '_')}_holdings.csv",
+    mime="text/csv",
+)
 
 delete_choice = st.selectbox("Remove a holding", options=["<none>"] + [f"{r['Symbol']} (id {r['id']})" for r in holdings_rows])
 if delete_choice != "<none>" and st.button("Delete Holding"):
@@ -151,6 +210,7 @@ if not valid_symbols:
 
 shares_map = {h["symbol"]: h["shares"] for h in holdings if h["symbol"] in current_prices}
 weights = portfolio_weights(shares_map, current_prices)
+total_portfolio_value = sum(shares_map[s] * current_prices[s] for s in shares_map)
 
 st.divider()
 col_alloc, col_metrics = st.columns([1, 1])
@@ -172,6 +232,7 @@ price_df = get_multi_symbol_close(valid_symbols)
 
 sharpe = None
 drawdown = None
+daily_returns = None
 with col_metrics:
     st.subheader("Risk Metrics")
     if len(price_df) < 2:
@@ -186,6 +247,57 @@ with col_metrics:
         metric_cols[1].metric("Max Drawdown" if mode == "Professional" else "Worst dip from a peak", f"{drawdown:.1%}")
         render_explanation(explain_sharpe(sharpe), mode)
         render_explanation(explain_drawdown(drawdown), mode)
+
+st.divider()
+col_sector, col_div, col_risk = st.columns(3)
+
+with col_sector:
+    st.subheader("Sector Allocation")
+    sector_by_symbol = {s: (_load_info(s) or {}).get("sector") for s in valid_symbols}
+    sector_weights = sector_allocation(sector_by_symbol, weights)
+    fig = go.Figure(
+        go.Pie(
+            labels=list(sector_weights.keys()),
+            values=list(sector_weights.values()),
+            marker=dict(colors=theme.CATEGORICAL[: len(sector_weights)]),
+            hole=0.4,
+        )
+    )
+    theme.apply_dark_layout(fig, margin=dict(t=10, l=10, r=10, b=10), height=300)
+    st.plotly_chart(fig, use_container_width=True)
+
+with col_div:
+    st.subheader("Diversification")
+    div_score = diversification_score(weights)
+    st.metric("Diversification Score" if mode == "Professional" else "How spread out?", f"{div_score:.0f}/100")
+    render_explanation(explain_diversification(div_score), mode)
+
+with col_risk:
+    st.subheader("Risk Meter")
+    vol = portfolio_volatility(daily_returns) if daily_returns is not None else None
+    band = risk_level(vol) if vol is not None else None
+    fig = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=(vol * 100) if vol is not None else 0.0,
+            number={"suffix": "%"},
+            gauge={
+                "axis": {"range": [0, 60]},
+                "bar": {"color": theme.DARK_INK_PRIMARY},
+                "steps": [
+                    {"range": [0, 15], "color": theme.STATUS_GOOD},
+                    {"range": [15, 30], "color": theme.STATUS_WARNING},
+                    {"range": [30, 60], "color": theme.STATUS_CRITICAL},
+                ],
+            },
+        )
+    )
+    theme.apply_dark_layout(fig, margin=dict(t=10, l=10, r=10, b=10), height=300)
+    st.plotly_chart(fig, use_container_width=True)
+    if band is not None:
+        render_explanation(explain_risk_level(band, vol), mode)
+    else:
+        st.caption("Not enough overlapping history to gauge risk yet.")
 
 st.divider()
 benchmark_label = st.radio("Benchmark", options=list(BENCHMARKS.keys()), index=0, horizontal=True)
@@ -232,6 +344,60 @@ if len(valid_symbols) >= 2 and len(price_df) >= 2:
     )
     theme.apply_dark_layout(fig, margin=dict(t=10, l=10, r=10, b=10), height=400)
     st.plotly_chart(fig, use_container_width=True)
+
+st.divider()
+st.subheader("Monte Carlo Simulation")
+if daily_returns is None or daily_returns.empty:
+    st.caption("Not enough overlapping history to run a simulation yet.")
+else:
+    horizon_label = st.radio("Horizon", options=["3 months", "6 months", "1 year"], index=2, horizontal=True)
+    horizon_days = {"3 months": 63, "6 months": 126, "1 year": 252}[horizon_label]
+    if st.button("Run Monte Carlo Simulation"):
+        with st.spinner("Simulating 500 possible paths from this portfolio's own historical daily returns..."):
+            paths = monte_carlo_simulation(daily_returns, total_portfolio_value, horizon_days=horizon_days, num_simulations=500)
+        st.session_state["mc_paths"] = paths
+        st.session_state["mc_portfolio"] = selected_name
+        st.session_state["mc_horizon"] = horizon_label
+
+    if st.session_state.get("mc_portfolio") == selected_name and st.session_state.get("mc_horizon") == horizon_label:
+        paths = st.session_state.get("mc_paths")
+        if paths is not None and not paths.empty:
+            percentiles = paths.quantile([0.05, 0.5, 0.95], axis=1).T
+            percentiles.columns = ["p5", "p50", "p95"]
+            trading_dates = pd.bdate_range(start=pd.Timestamp.today().normalize(), periods=len(percentiles))
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=trading_dates, y=percentiles["p95"], line=dict(width=0), showlegend=False, hoverinfo="skip"))
+            fig.add_trace(
+                go.Scatter(
+                    x=trading_dates,
+                    y=percentiles["p5"],
+                    fill="tonexty",
+                    fillcolor="rgba(42, 120, 214, 0.2)",
+                    line=dict(width=0),
+                    name="5th-95th percentile range",
+                )
+            )
+            fig.add_trace(go.Scatter(x=trading_dates, y=percentiles["p50"], name="Median simulated path", line=dict(color=theme.CATEGORICAL[0], width=2)))
+            theme.apply_dark_layout(
+                fig,
+                yaxis_title="Simulated Portfolio Value (₹)",
+                margin=dict(t=10, l=10, r=10, b=10),
+                height=380,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            end_p5, end_p50, end_p95 = percentiles.iloc[-1][["p5", "p50", "p95"]]
+            mc_cols = st.columns(3)
+            mc_cols[0].metric("Pessimistic (5th pct)" if mode == "Professional" else "If things go badly", format_inr(end_p5))
+            mc_cols[1].metric("Median" if mode == "Professional" else "Most likely", format_inr(end_p50))
+            mc_cols[2].metric("Optimistic (95th pct)" if mode == "Professional" else "If things go well", format_inr(end_p95))
+            st.caption(
+                f"500 simulated {horizon_label} paths, built by resampling (with replacement) from this "
+                "portfolio's own historical daily returns -- not a forecast, prediction, or guarantee. "
+                "Past patterns may not repeat; this is a range of statistically plausible outcomes, not advice."
+            )
 
 st.divider()
 portfolio_ai_data = {

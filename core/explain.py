@@ -322,6 +322,66 @@ def explain_drawdown(value: float | None) -> Explanation:
     )
 
 
+def explain_diversification(score: float | None) -> Explanation:
+    """Diversification score (0-100): how spread out the portfolio is, not just how many stocks it holds."""
+    if score is None:
+        return Explanation(
+            "We don't have enough data yet to tell you this.",
+            "Insufficient holdings to compute a diversification score.",
+            "neutral",
+        )
+    if score >= 70:
+        return Explanation(
+            f"Your money is spread out nicely across your holdings (score: {score:.0f}/100) — if one "
+            "stock has a bad day, it probably won't sink the whole portfolio.",
+            f"Diversification score {score:.0f}/100 (from position-weight HHI) -- value is well "
+            "distributed across holdings, limiting single-name concentration risk.",
+            "good",
+        )
+    if score < 40:
+        return Explanation(
+            f"A lot of your money is riding on just one or two stocks (score: {score:.0f}/100) — if one "
+            "of them drops a lot, your whole portfolio feels it.",
+            f"Diversification score {score:.0f}/100 (from position-weight HHI) -- value is concentrated "
+            "in a small number of holdings, raising single-name risk.",
+            "worried",
+        )
+    return Explanation(
+        f"Your money is somewhat spread out (score: {score:.0f}/100), but a few stocks still carry more "
+        "weight than the rest.",
+        f"Diversification score {score:.0f}/100 (from position-weight HHI) -- moderate concentration.",
+        "neutral",
+    )
+
+
+def explain_risk_level(level: str, volatility_annualized: float | None) -> Explanation:
+    """Portfolio risk band (Low/Medium/High) from annualized volatility."""
+    vol_bit = f" (annualized volatility {volatility_annualized:.1%})" if volatility_annualized is not None else ""
+    if level == "Low":
+        return Explanation(
+            "This portfolio's value tends to move fairly gently day to day — a calmer ride "
+            "than the typical stock portfolio.",
+            f"Risk band: Low{vol_bit}. Below the ~15-35% annualized-volatility range typical of NSE "
+            "large/mid-cap equity portfolios.",
+            "good",
+        )
+    if level == "High":
+        return Explanation(
+            "This portfolio's value can swing a lot day to day — expect a bumpier ride than "
+            "average, in both directions.",
+            f"Risk band: High{vol_bit}. Above the ~15-35% annualized-volatility range typical of NSE "
+            "large/mid-cap equity portfolios.",
+            "worried",
+        )
+    return Explanation(
+        "This portfolio's value moves around a normal amount for stocks — not unusually "
+        "calm or unusually wild.",
+        f"Risk band: Medium{vol_bit}. Within the ~15-35% annualized-volatility range typical of NSE "
+        "large/mid-cap equity portfolios.",
+        "neutral",
+    )
+
+
 def explain_sentiment(score: float | None) -> Explanation:
     """News sentiment score (-1 to +1): whether recent news reads positive or negative."""
     if score is None:

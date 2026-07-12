@@ -9,10 +9,15 @@ import pytest
 from core.portfolio import (
     correlation_matrix,
     cumulative_returns,
+    diversification_score,
     max_drawdown,
+    monte_carlo_simulation,
     portfolio_daily_returns,
+    portfolio_volatility,
     portfolio_weights,
     position_values,
+    risk_level,
+    sector_allocation,
     sharpe_ratio,
 )
 
@@ -109,3 +114,71 @@ def test_portfolio_daily_returns_weighted_average():
     expected = 0.5 * a_returns + 0.5 * b_returns
 
     pd.testing.assert_series_equal(result, expected, check_names=False)
+
+
+def test_sector_allocation_groups_and_sums_weights():
+    sectors = {"RELIANCE.NS": "Energy", "TCS.NS": "Technology", "INFY.NS": "Technology"}
+    weights = {"RELIANCE.NS": 0.5, "TCS.NS": 0.3, "INFY.NS": 0.2}
+    result = sector_allocation(sectors, weights)
+    assert result == pytest.approx({"Energy": 0.5, "Technology": 0.5})
+
+
+def test_sector_allocation_unknown_sector_grouped():
+    sectors = {"A": None}
+    weights = {"A": 1.0}
+    assert sector_allocation(sectors, weights) == {"Unknown": 1.0}
+
+
+def test_diversification_score_single_position_is_zero():
+    assert diversification_score({"A": 1.0}) == pytest.approx(0.0)
+
+
+def test_diversification_score_equal_weighted_rises_with_more_positions():
+    two = diversification_score({"A": 0.5, "B": 0.5})
+    four = diversification_score({"A": 0.25, "B": 0.25, "C": 0.25, "D": 0.25})
+    assert 0 < two < four <= 100
+
+
+def test_diversification_score_empty_is_zero():
+    assert diversification_score({}) == 0.0
+
+
+def test_portfolio_volatility_matches_manual_calculation():
+    daily = pd.Series([0.01, -0.02, 0.015, 0.0, -0.01])
+    expected = float(daily.std()) * math.sqrt(252)
+    assert portfolio_volatility(daily) == pytest.approx(expected)
+
+
+def test_portfolio_volatility_unannualized():
+    daily = pd.Series([0.01, -0.02, 0.015])
+    assert portfolio_volatility(daily, annualize=False) == pytest.approx(float(daily.std()))
+
+
+def test_portfolio_volatility_empty_is_zero():
+    assert portfolio_volatility(pd.Series(dtype=float)) == 0.0
+
+
+def test_risk_level_bands():
+    assert risk_level(0.05) == "Low"
+    assert risk_level(0.20) == "Medium"
+    assert risk_level(0.40) == "High"
+
+
+def test_monte_carlo_simulation_shape_and_starting_value():
+    daily = pd.Series(np.random.default_rng(0).normal(0.0005, 0.01, 500))
+    result = monte_carlo_simulation(daily, initial_value=10000.0, horizon_days=30, num_simulations=50, seed=1)
+    assert result.shape == (31, 50)
+    assert (result.iloc[0] == 10000.0).all()
+    assert (result.iloc[-1] > 0).all()  # bootstrapped equity returns can't drive value negative
+
+
+def test_monte_carlo_simulation_is_reproducible_with_seed():
+    daily = pd.Series(np.random.default_rng(0).normal(0.0005, 0.01, 200))
+    first = monte_carlo_simulation(daily, initial_value=1000.0, horizon_days=10, num_simulations=20, seed=7)
+    second = monte_carlo_simulation(daily, initial_value=1000.0, horizon_days=10, num_simulations=20, seed=7)
+    pd.testing.assert_frame_equal(first, second)
+
+
+def test_monte_carlo_simulation_empty_returns_empty_df():
+    assert monte_carlo_simulation(pd.Series(dtype=float), initial_value=1000.0).empty
+    assert monte_carlo_simulation(pd.Series([0.01, 0.02]), initial_value=0.0).empty
