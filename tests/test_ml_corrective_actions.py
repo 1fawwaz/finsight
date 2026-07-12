@@ -17,6 +17,33 @@ _STABLE = {"accuracy": 0.55, "roc_auc": 0.55, "precision": 0.5, "recall": 0.5, "
 _LOW_STD = {"accuracy": 0.02, "roc_auc": 0.02, "precision": 0.02, "recall": 0.02, "f1": 0.02}
 
 
+@pytest.mark.parametrize(
+    "family, base_params, tighter_key, tighter_direction",
+    [
+        ("xgboost", {"max_depth": 8, "reg_lambda": 1.0, "subsample": 0.9}, "max_depth", "lower"),
+        ("catboost", {"depth": 8, "l2_leaf_reg": 3.0}, "depth", "lower"),
+        ("lightgbm", {"max_depth": 8, "min_child_samples": 10, "num_leaves": 63}, "num_leaves", "lower"),
+    ],
+)
+def test_regularize_tightens_capacity_for_every_family(family, base_params, tighter_key, tighter_direction):
+    result = _regularize(family, base_params)
+    if tighter_direction == "lower":
+        assert result[tighter_key] <= base_params[tighter_key]
+
+
+@pytest.mark.parametrize(
+    "family, base_params, looser_key",
+    [
+        ("xgboost", {"max_depth": 3, "reg_lambda": 5.0}, "max_depth"),
+        ("catboost", {"depth": 3, "l2_leaf_reg": 5.0}, "depth"),
+        ("lightgbm", {"max_depth": 3, "num_leaves": 15}, "max_depth"),
+    ],
+)
+def test_deregularize_loosens_capacity_for_every_family(family, base_params, looser_key):
+    result = _deregularize(family, base_params)
+    assert result[looser_key] >= base_params[looser_key]
+
+
 def test_regularize_random_forest_reduces_capacity():
     p = _regularize("random_forest", {"n_estimators": 200, "max_depth": 12, "min_samples_leaf": 5, "max_features": "sqrt"})
     assert p["max_depth"] <= 3
