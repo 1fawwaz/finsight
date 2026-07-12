@@ -1,7 +1,5 @@
 """Tests for core.fundamentals: cached, best-effort yfinance fundamentals snapshot."""
 
-import pytest
-
 import core.fundamentals as fundamentals_module
 from core.fundamentals import Fundamentals, get_fundamentals
 
@@ -19,7 +17,7 @@ def test_get_fundamentals_returns_real_fields(monkeypatch):
             {
                 "marketCap": 1_000_000_000,
                 "trailingPE": 22.5,
-                "dividendYield": 0.012,
+                "trailingAnnualDividendRate": 6.0,
                 "fiftyTwoWeekHigh": 1500.0,
                 "fiftyTwoWeekLow": 1100.0,
             }
@@ -29,25 +27,25 @@ def test_get_fundamentals_returns_real_fields(monkeypatch):
     assert result.available is True
     assert result.market_cap == 1_000_000_000
     assert result.pe_ratio == 22.5
+    assert result.dividend_rate == 6.0
     assert result.fifty_two_week_high == 1500.0
     assert result.fifty_two_week_low == 1100.0
 
 
-def test_get_fundamentals_normalizes_percentage_style_dividend_yield(monkeypatch):
-    # Regression: yfinance returned dividendYield=9.69 for a real ~9.69% yield (already
-    # a percentage), not 0.0969 (a fraction). Without normalizing, downstream `:.1%}`
-    # formatting would double-multiply this into an impossible "969.0%".
+def test_get_fundamentals_does_not_trust_yfinances_precomputed_dividend_yield(monkeypatch):
+    # Regression: yfinance's own `dividendYield` field was confirmed empirically to
+    # disagree with a real ticker's actual dividend-rate/price ratio (e.g. WIPRO: field
+    # said 9.69, but rate/price says ~6.3%, matching the real declared dividend). This
+    # module must not even read that field -- callers compute yield themselves from
+    # dividend_rate and the current price.
     fundamentals_module.clear_cache()
-    monkeypatch.setattr(fundamentals_module.yf, "Ticker", _fake_ticker_with_info({"dividendYield": 9.69}))
+    monkeypatch.setattr(
+        fundamentals_module.yf,
+        "Ticker",
+        _fake_ticker_with_info({"dividendYield": 9.69, "trailingAnnualDividendRate": 11.0}),
+    )
     result = get_fundamentals("WIPRO.NS")
-    assert result.dividend_yield == pytest.approx(0.0969)
-
-
-def test_get_fundamentals_leaves_fraction_style_dividend_yield_unchanged(monkeypatch):
-    fundamentals_module.clear_cache()
-    monkeypatch.setattr(fundamentals_module.yf, "Ticker", _fake_ticker_with_info({"dividendYield": 0.0325}))
-    result = get_fundamentals("SOMETICKER.NS")
-    assert result.dividend_yield == pytest.approx(0.0325)
+    assert result.dividend_rate == 11.0
 
 
 def test_get_fundamentals_missing_fields_are_none_not_fabricated(monkeypatch):

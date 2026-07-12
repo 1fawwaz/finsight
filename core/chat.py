@@ -279,7 +279,13 @@ def _symbol_context(symbol: str) -> dict:
     if fundamentals.available:
         context["pe_ratio"] = round(fundamentals.pe_ratio, 1) if fundamentals.pe_ratio is not None else None
         context["market_cap"] = fundamentals.market_cap
-        context["dividend_yield"] = round(fundamentals.dividend_yield, 4) if fundamentals.dividend_yield is not None else None
+        # Computed here (dividend rate / current price) rather than trusting yfinance's
+        # own pre-computed `dividendYield` field, which was confirmed empirically to
+        # disagree with this calculation for some tickers.
+        if fundamentals.dividend_rate is not None and context["last_close"]:
+            context["dividend_yield"] = round(fundamentals.dividend_rate / context["last_close"], 4)
+        else:
+            context["dividend_yield"] = None
         context["52w_high"] = fundamentals.fifty_two_week_high
         context["52w_low"] = fundamentals.fifty_two_week_low
 

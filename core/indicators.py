@@ -45,6 +45,12 @@ def _wilder_smooth(deltas: pd.Series, window: int) -> pd.Series:
     `deltas` is expected to have a leading NaN (e.g. from Series.diff()), so the
     first `window` real observations are deltas.iloc[1:window+1].
     """
+    if len(deltas) <= window:
+        # Too little history to seed a window-length average (e.g. a newly-listed
+        # stock with under `window` days of trading) -- NaN, not a crash. iloc
+        # assignment below would otherwise raise IndexError trying to enlarge the
+        # series at position `window`, which doesn't exist yet.
+        return pd.Series(np.nan, index=deltas.index)
     seed = deltas.iloc[1 : window + 1].mean()
     seeded = deltas.copy()
     seeded.iloc[:window] = np.nan
@@ -106,6 +112,9 @@ def atr(high: pd.Series, low: pd.Series, close: pd.Series, window: int = 14) -> 
 
 
 def _atr_smooth(tr: pd.Series, window: int) -> pd.Series:
+    if len(tr) < window:
+        # Too little history to seed a window-length average -- NaN, not a crash.
+        return pd.Series(np.nan, index=tr.index)
     # True range has no leading NaN (unlike diff()-based series), so seed directly
     # from its first `window` values rather than reusing _wilder_smooth's diff-shaped
     # assumption of a leading NaN.

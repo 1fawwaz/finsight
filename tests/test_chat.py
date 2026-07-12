@@ -15,12 +15,14 @@ from core.chat import (
     ConversationMemory,
     _build_fallback_answer,
     _fallback_answer,
+    _symbol_context,
     answer_question,
     detect_intent,
     extract_symbols,
     gather_context,
     resolve_symbols_with_memory,
 )
+from core.fundamentals import Fundamentals
 
 
 # --- extract_symbols --------------------------------------------------------------------
@@ -149,6 +151,37 @@ def test_answer_question_followup_uses_prior_memory(monkeypatch):
 
 
 # --- gather_context ------------------------------------------------------------------------
+
+
+def test_symbol_context_computes_dividend_yield_from_rate_and_price(temp_db, monkeypatch):
+    # Regression: yfinance's own `dividendYield` field disagreed with reality for some
+    # tickers, so the dividend yield shown to the user must be computed here from a
+    # verified dividend rate (rupees/share) and the stock's own current price, not
+    # trusted from that field.
+    from datetime import date
+
+    from core.database import Price, Ticker, get_session
+
+    with get_session() as session:
+        ticker = Ticker(symbol="WIPRO.NS", name="Wipro Limited", sector="Technology")
+        session.add(ticker)
+        session.flush()
+        session.add(
+            Price(ticker_id=ticker.id, date=date(2026, 7, 9), open=169.0, high=174.0, low=168.0, close=172.0, volume=1_000_000)
+        )
+        session.add(
+            Price(ticker_id=ticker.id, date=date(2026, 7, 10), open=170.0, high=176.0, low=169.0, close=175.46, volume=1_000_000)
+        )
+
+    monkeypatch.setattr(
+        "core.chat.get_fundamentals",
+        lambda symbol: Fundamentals(
+            market_cap=None, pe_ratio=14.0, dividend_rate=11.0, fifty_two_week_high=None, fifty_two_week_low=None, available=True
+        ),
+    )
+
+    context = _symbol_context("WIPRO.NS")
+    assert context["dividend_yield"] == pytest.approx(11.0 / 175.46, rel=1e-3)
 
 
 def test_gather_context_never_embeds_ns_or_bo_suffix():

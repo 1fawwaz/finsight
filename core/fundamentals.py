@@ -1,4 +1,4 @@
-"""Live fundamental snapshot (market cap, P/E, dividend yield, 52-week range) for a
+"""Live fundamental snapshot (market cap, P/E, dividend rate, 52-week range) for a
 symbol, fetched from yfinance with a short in-memory cache.
 
 Unlike OHLCV history, fundamentals aren't persisted to SQLite: they're only meaningful
@@ -26,29 +26,24 @@ _cache: dict[str, tuple[float, "Fundamentals"]] = {}
 class Fundamentals:
     """A best-effort fundamentals snapshot. `available=False` means the fetch failed or
     returned nothing usable -- callers must treat every field as unknown in that case,
-    never substitute a fabricated or zero value."""
+    never substitute a fabricated or zero value.
+
+    `dividend_rate` is the trailing annual dividend in rupees per share, not a
+    pre-computed yield percentage -- yfinance's own `dividendYield` field was confirmed
+    empirically to disagree with `dividend_rate / price` for some tickers (e.g. WIPRO:
+    field said 9.69, but rate/price says ~6.3, matching the real declared dividend).
+    Callers should divide by the current price themselves to get a yield they can trust.
+    """
 
     market_cap: float | None
     pe_ratio: float | None
-    dividend_yield: float | None
+    dividend_rate: float | None
     fifty_two_week_high: float | None
     fifty_two_week_low: float | None
     available: bool
 
 
 _UNAVAILABLE = Fundamentals(None, None, None, None, None, available=False)
-
-
-def _normalize_dividend_yield(raw: float | None) -> float | None:
-    """yfinance has inconsistently expressed `dividendYield` as either a fraction
-    (0.0325 for 3.25%) or an already-multiplied percentage (3.25) across versions and
-    even across tickers within the same version -- confirmed empirically (yfinance
-    1.5.1 returned 9.69 for a real ~9.7% yield, not 0.0969). No real equity sustains a
-    dividend yield anywhere near 100%, so treat any value over 1 as already being a
-    percentage and rescale it, rather than trusting the API's units blindly."""
-    if raw is None:
-        return None
-    return raw / 100 if raw > 1 else raw
 
 
 def get_fundamentals(symbol: str) -> Fundamentals:
@@ -63,7 +58,7 @@ def get_fundamentals(symbol: str) -> Fundamentals:
         result = Fundamentals(
             market_cap=info.get("marketCap"),
             pe_ratio=info.get("trailingPE"),
-            dividend_yield=_normalize_dividend_yield(info.get("dividendYield")),
+            dividend_rate=info.get("trailingAnnualDividendRate"),
             fifty_two_week_high=info.get("fiftyTwoWeekHigh"),
             fifty_two_week_low=info.get("fiftyTwoWeekLow"),
             available=True,

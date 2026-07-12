@@ -209,6 +209,27 @@ def test_adx_is_bounded_zero_to_hundred():
     assert (valid <= 100).all()
 
 
+def test_rsi_short_history_returns_nan_not_crash():
+    # Regression: a newly-listed stock with fewer trading days than the RSI window
+    # (e.g. an IPO with 5 days of history) used to raise IndexError deep inside Wilder
+    # smoothing instead of returning NaN like every other "not enough data yet" case.
+    df = _make_ohlcv(5)
+    result = rsi(df["close"], window=14)
+    assert result.isna().all()
+
+
+def test_atr_short_history_returns_nan_not_crash():
+    df = _make_ohlcv(5)
+    result = atr(df["high"], df["low"], df["close"], window=14)
+    assert result.isna().all()
+
+
+def test_adx_short_history_returns_nan_not_crash():
+    df = _make_ohlcv(5)
+    result = adx(df["high"], df["low"], df["close"], window=14)
+    assert result.isna().all()
+
+
 def test_vwap_matches_manual_rolling_calculation():
     df = _make_ohlcv(30)
     window = 10
