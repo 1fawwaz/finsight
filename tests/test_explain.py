@@ -11,6 +11,7 @@ from core.explain import (
     explain_bollinger,
     explain_diversification,
     explain_drawdown,
+    explain_fundamentals,
     explain_macd,
     explain_ml_prediction,
     explain_resistance,
@@ -170,6 +171,30 @@ def test_explain_risk_level_bands():
 
 def test_explain_risk_level_handles_missing_volatility():
     result = explain_risk_level("Medium", None)
+    assert isinstance(result, Explanation)
+    assert result.mood == "neutral"
+
+
+def test_explain_fundamentals_high_pe_is_neutral_not_worried():
+    result = explain_fundamentals(pe_ratio=55.0, dividend_yield=None)
+    assert result.mood == "neutral"
+    _assert_no_jargon(result.simple)
+    assert "55" in result.professional
+
+
+def test_explain_fundamentals_negative_pe_is_worried():
+    result = explain_fundamentals(pe_ratio=-3.0, dividend_yield=None)
+    assert result.mood == "worried"
+    _assert_no_jargon(result.simple)
+
+
+def test_explain_fundamentals_includes_dividend_yield_when_present():
+    result = explain_fundamentals(pe_ratio=18.0, dividend_yield=0.015)
+    assert "1.5%" in result.simple or "1.5%" in result.professional
+
+
+def test_explain_fundamentals_handles_missing_data():
+    result = explain_fundamentals(pe_ratio=None, dividend_yield=None)
     assert isinstance(result, Explanation)
     assert result.mood == "neutral"
 

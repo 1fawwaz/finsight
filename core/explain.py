@@ -382,6 +382,40 @@ def explain_risk_level(level: str, volatility_annualized: float | None) -> Expla
     )
 
 
+def explain_fundamentals(pe_ratio: float | None, dividend_yield: float | None) -> Explanation:
+    """P/E ratio and dividend yield: how expensive the stock is relative to its
+    earnings, and how much of a cash payout it offers."""
+    if pe_ratio is None and dividend_yield is None:
+        return Explanation(
+            "We don't have company financial details for this one right now.",
+            "Fundamental data (P/E, dividend yield) unavailable for this symbol.",
+            "neutral",
+        )
+    bits_simple: list[str] = []
+    bits_pro: list[str] = []
+    mood: Mood = "neutral"
+    if pe_ratio is not None:
+        if pe_ratio <= 0:
+            bits_simple.append("the company hasn't been profitable lately, so its price-to-earnings comparison doesn't apply")
+            bits_pro.append(f"P/E {pe_ratio:.1f} (negative/not meaningful -- recent earnings are negative)")
+            mood = "worried"
+        elif pe_ratio > 40:
+            bits_simple.append(f"the stock is priced high compared to its profits (P/E {pe_ratio:.1f}) -- investors are paying a lot for future growth")
+            bits_pro.append(f"P/E {pe_ratio:.1f}, rich relative to broad NSE large-cap norms (~15-30)")
+        elif pe_ratio < 10:
+            bits_simple.append(f"the stock is priced cheaply compared to its profits (P/E {pe_ratio:.1f})")
+            bits_pro.append(f"P/E {pe_ratio:.1f}, low relative to broad NSE large-cap norms (~15-30)")
+        else:
+            bits_simple.append(f"the stock's price looks reasonable next to its profits (P/E {pe_ratio:.1f})")
+            bits_pro.append(f"P/E {pe_ratio:.1f}, within typical NSE large-cap norms (~15-30)")
+    if dividend_yield is not None and dividend_yield > 0:
+        bits_simple.append(f"it also pays shareholders about {dividend_yield:.1%} of the share price back each year as a dividend")
+        bits_pro.append(f"dividend yield {dividend_yield:.1%}")
+    simple = "For this company, " + "; ".join(bits_simple) + "." if bits_simple else "Limited fundamental data available for this company."
+    professional = "; ".join(bits_pro) + "." if bits_pro else "Limited fundamental data available."
+    return Explanation(simple, professional, mood)
+
+
 def explain_sentiment(score: float | None) -> Explanation:
     """News sentiment score (-1 to +1): whether recent news reads positive or negative."""
     if score is None:
