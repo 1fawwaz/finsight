@@ -49,7 +49,7 @@ do not restart a step marked Complete.
 | 3. Sector-Relative Features | **Complete** | `core/ml/sector_features.py` (new), `tests/test_ml_sector_features.py` (new, 6) | 6 new, all passing | see below |
 | 4. Market Breadth | **Complete** | `core/database.py` (+`MarketBreadthDaily`, new table), `core/ml/market_breadth.py` (new), `tests/test_ml_market_breadth.py` (new, 8) | 8 new, all passing | see below |
 | 5. Volatility Features | **Complete** | `core/indicators.py` (extended: +5 functions), `tests/test_indicators.py` (+12) | 12 new, all passing | see below |
-| 6. Feature Selection | Pending | | | |
+| 6. Feature Selection | **Complete** | `core/database.py` (+`FeatureRegistry`, new table), `core/ml/feature_selection.py` (new), `tests/test_ml_feature_selection.py` (new, 12) | 12 new, all passing | see below |
 | 7. Probability Calibration | Pending | | | |
 | 8. Walk-Forward Validation | Pending | | | |
 | 9. Time-Series Cross-Validation | Pending | | | |
@@ -195,6 +195,42 @@ do not restart a step marked Complete.
   close-to-close (~0.186), Parkinson (~0.158), Yang-Zhang all real and in a sensible
   range; `volatility_regime` correctly transitions low→medium over the last 5 real
   trading days as `vol_percentile` crosses the 0.33 tercile boundary.
+
+## Evidence — Step 6
+
+- **Reuse:** `core.ml.cv.time_series_cv_folds`/`assert_no_chronological_leakage` (Phase 3)
+  for stability analysis -- no new CV logic. Gain-based importance and SHAP already
+  exist in `core.ml.evaluation` (Phase 3) and are intentionally not re-derived here;
+  Step 6 adds what didn't exist: mutual information, permutation importance,
+  correlation redundancy, cross-fold stability, and the Feature Registry.
+- **New table justified:** `feature_registry` — no existing table tracks feature
+  lifecycle/deprecation decisions with evidence.
+- **A real design lesson, not a threshold-tuning exercise:** the first version flagged
+  "weak" features using an absolute permutation-importance threshold. Testing against a
+  synthetic zero-signal feature showed permutation importance is too noisy for an
+  absolute cutoff to be reliable (a genuinely useless feature scored 0.0064–0.0077
+  across repeated runs — indistinguishable by magnitude from other noise features, no
+  clean gap from zero). **Refactored** to `flag_weak_features`: MI still uses an
+  absolute near-zero threshold (well-behaved there), but permutation importance is
+  judged by *relative rank* (bottom 50% of the feature set) instead — robust to the
+  same noise that broke the absolute-threshold version. The deterministic flagging
+  logic is now unit-tested directly with hand-supplied values, separate from the noisy
+  end-to-end statistical computation.
+- **Tests:** 12 new, all passing.
+- **Full suite: 518 passed** (506 + 12), 0 regressions.
+- **Migration evidence:** backup
+  `data/backups/finsight_phase2_feature_registry_schema_migration_20260713_114356.db`,
+  verified; new table confirmed via `sqlalchemy.inspect`.
+- **Real evidence, RELIANCE.NS's real 34-feature set (`build_features_v3`):** found 28
+  correlated pairs above 0.9, including a genuine near-duplicate
+  (`bollinger_pct_b`/`price_zscore_20` at correlation 1.0000 — both are z-score-like
+  formulas, confirming the redundancy detector works on real, not just synthetic,
+  data) and `roc_10`/`momentum_10`/`rolling_return_mean_10` all mutually >0.99
+  correlated (three different formulations of "recent return," as expected). Flagged 7
+  weak candidates (`sma_20_dist`, `volatility_20`, `ema_20_dist`,
+  `dist_from_resistance`, `drawdown_20`, `momentum_20`, `rolling_sharpe_20`) --
+  **not deprecated** (that needs a deliberate registry decision with evidence, per the
+  directive; flagging is the evidence, not the decision itself).
 
 ## Notes on sequencing vs. the directive's own text
 

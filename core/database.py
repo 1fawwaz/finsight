@@ -458,6 +458,22 @@ class MarketBreadthDaily(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class FeatureRegistry(Base):
+    """Phase 2 Step 6: evidence-based feature lifecycle tracking. A feature is
+    deprecated only through this table, with evidence attached -- never by silently
+    deleting it from a feature-building function, per the directive's explicit
+    prohibition ("No silent removal of features -- deprecate only through the Feature
+    Registry, with evidence")."""
+
+    __tablename__ = "feature_registry"
+
+    feature_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")  # "active" or "deprecated"
+    reason: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    evidence_json: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    decided_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 _engine = create_engine(DATABASE_URL, echo=False, future=True)
 SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
 
