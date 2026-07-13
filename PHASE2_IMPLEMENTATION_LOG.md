@@ -46,7 +46,7 @@ do not restart a step marked Complete.
 |---|---|---|---|---|
 | 1. Better Labels | **Implemented; selection PROVISIONAL pending Step 12** | `core/ml/labels.py` (new), `tests/test_ml_labels.py` (new, 16) | 16 new, all passing | see below |
 | 2. Rolling Feature Engineering | **Complete** | `core/ml/feature_pipeline.py` (+`build_features_v3`/`make_dataset_v3`), `tests/test_ml_feature_pipeline.py` (+8) | 8 new, all passing | see below |
-| 3. Sector-Relative Features | Pending | | | |
+| 3. Sector-Relative Features | **Complete** | `core/ml/sector_features.py` (new), `tests/test_ml_sector_features.py` (new, 6) | 6 new, all passing | see below |
 | 4. Market Breadth | Pending | | | |
 | 5. Volatility Features | Pending | | | |
 | 6. Feature Selection | Pending | | | |
@@ -119,6 +119,28 @@ do not restart a step marked Complete.
 - **Real evidence:** built the full 34-feature set for RELIANCE.NS live data --
   correct shape, sensible real values (e.g. `volume_percentile_20` between 0.25–0.60
   over the last 3 real trading days).
+
+## Evidence — Step 3
+
+- **Sector mapping sourced from `core.database.Ticker.sector`** (yfinance-populated),
+  never hardcoded, per the directive's explicit prohibition. Real sector composition
+  checked against the live DB: Technology (TCS/INFY/WIPRO, 3 members), Financial
+  Services (4 members), Energy/Consumer Cyclical/Utilities (2 members each), and four
+  single-member sectors (Communication Services, Consumer Defensive, Industrials, Basic
+  Materials) plus 3 sector-less benchmark indices.
+- **`MIN_SECTOR_PEERS = 2`** is a real, tested design decision: a symbol with 0 or 1
+  tracked peers gets NaN sector-relative features (an honest "unknown"), not a
+  fabricated composite from itself or one other stock.
+- **Test bug found and fixed, not production:** one test seeded only 1 peer for a
+  feature that requires ≥2 by design, so it correctly returned NaN and the test's own
+  assumption was wrong -- fixed by adding a second peer.
+- **Tests:** 6 new, including a hand-computed excess-return equality check, all passing.
+- **Full suite: 486 passed** (480 + 6), 0 regressions.
+- **Real evidence:** `TCS.NS` (peers: `INFY.NS`, `WIPRO.NS`) shows real
+  `relative_strength_vs_sector` ≈ 0.93 (recently underperforming its sector composite)
+  and `sector_breadth` between 0.0–0.5. `BHARTIARTL.NS` (the real sole Communication
+  Services stock in the tracked universe) correctly returns all-NaN, not a fabricated
+  value.
 
 ## Notes on sequencing vs. the directive's own text
 
