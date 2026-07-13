@@ -67,6 +67,18 @@ class Price(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), nullable=False, index=True)
+    # Phase 1 (additive): the permanent, ticker-change-safe identity this row belongs to,
+    # per docs/FINSIGHT_PHASE1_PHASE2_AGENT_SPEC.md §7.3 ("merge safely under
+    # (internal_id, trading_date), not (symbol, trading_date)"). Nullable + no DB-level
+    # UNIQUE(internal_id, date) constraint here deliberately: SQLite can't ALTER TABLE
+    # ADD CONSTRAINT on a table that already holds live rows without a full table
+    # rebuild (the same limitation hit for news_sentiment's UNIQUE constraint in Phase
+    # 3 -- see finsight/SESSION_STATE.md), and forcing that rebuild on this table isn't
+    # a "smallest safe change" for this step. Dedup-by-internal_id is enforced at the
+    # application level in core.data_ingestion.upsert_prices instead; a true DB-level
+    # constraint is deferred to the Parquet market_data table (Step 16), which is
+    # designed with internal_id as a first-class key from the start.
+    internal_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     open: Mapped[float] = mapped_column(Float, nullable=False)
     high: Mapped[float] = mapped_column(Float, nullable=False)
@@ -409,9 +421,43 @@ _engine = create_engine(DATABASE_URL, echo=False, future=True)
 SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
 
 
+# Columns added to an *existing* table after its initial release. `Base.metadata
+# .create_all()` only issues `CREATE TABLE IF NOT EXISTS` -- it does NOT diff columns on
+# a table that already exists, so a new nullable column on an existing model (like
+# Price.internal_id, added in Phase 1) silently never reaches an already-created
+# database without an explicit ALTER TABLE. This list is exactly that explicit,
+# additive-only migration step, applied idempotently on every init_db() call. Found via
+# a real regression: the ORM model referenced `prices.internal_id`, but on-disk `prices`
+# (created before this column existed) didn't have it, raising
+# `sqlite3.OperationalError: no such column` the moment any query touched it.
+_ADDITIVE_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
+    # (table_name, column_name, column_ddl)
+    ("prices", "internal_id", "VARCHAR(32)"),
+]
+
+
+def _apply_additive_column_migrations() -> None:
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(_engine)
+    existing_tables = set(inspector.get_table_names())
+    with _engine.begin() as conn:
+        for table_name, column_name, column_ddl in _ADDITIVE_COLUMN_MIGRATIONS:
+            if table_name not in existing_tables:
+                continue  # a brand-new install creates this table (with the column) via create_all() instead
+            existing_columns = {c["name"] for c in inspector.get_columns(table_name)}
+            if column_name in existing_columns:
+                continue
+            conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_ddl}"))
+            logger.info("Migration: added column %s.%s (%s)", table_name, column_name, column_ddl)
+
+
 def init_db() -> None:
-    """Create all tables if they do not already exist."""
+    """Create all tables if they do not already exist, then apply any pending additive
+    column migrations to tables that already existed (see `_ADDITIVE_COLUMN_MIGRATIONS`).
+    Both steps are idempotent -- safe to call on every startup."""
     Base.metadata.create_all(_engine)
+    _apply_additive_column_migrations()
     logger.info("Database initialized at %s", DATABASE_URL)
 
 

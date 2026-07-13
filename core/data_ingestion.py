@@ -12,6 +12,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from core.config import DEFAULT_TICKERS, HISTORY_PERIOD, UNSUPPORTED_MARKET_MESSAGE, get_logger, is_supported_symbol
 from core.database import Price, Ticker, get_session, init_db
+from core.symbol_registry import get_or_create as get_or_create_symbol_registry_entry
 from core.universe import resolve_symbol
 
 logger = get_logger(__name__)
@@ -76,11 +77,24 @@ def fetch_price_history(symbol: str, period: str = HISTORY_PERIOD) -> pd.DataFra
     return history
 
 
-def upsert_prices(session, ticker: Ticker, history: pd.DataFrame) -> int:
-    """Insert new price rows for a ticker, skipping dates already present. Returns rows inserted."""
+def upsert_prices(session, ticker: Ticker, history: pd.DataFrame, internal_id: str | None = None) -> int:
+    """Insert new price rows for a ticker, skipping dates already present. Returns rows inserted.
+
+    `internal_id` (optional, backward compatible -- existing callers passing only
+    `session`/`ticker`/`history` are unaffected) stamps the Phase 1 permanent-identity
+    key onto each inserted row and, when provided, extends the dedup check to also skip
+    any date already present under that `internal_id` via a *different* `ticker_id` --
+    the case a ticker rename produces (two `Ticker` rows, one `internal_id`), per
+    docs/FINSIGHT_PHASE1_PHASE2_AGENT_SPEC.md §7.3. Without an `internal_id`, dedup
+    behavior is byte-identical to before this parameter existed.
+    """
     existing_dates = set(
         session.execute(select(Price.date).where(Price.ticker_id == ticker.id)).scalars().all()
     )
+    if internal_id is not None:
+        existing_dates |= set(
+            session.execute(select(Price.date).where(Price.internal_id == internal_id)).scalars().all()
+        )
 
     inserted = 0
     for ts, row in history.iterrows():
@@ -92,6 +106,7 @@ def upsert_prices(session, ticker: Ticker, history: pd.DataFrame) -> int:
         session.add(
             Price(
                 ticker_id=ticker.id,
+                internal_id=internal_id,
                 date=bar_date,
                 open=float(row["Open"]),
                 high=float(row["High"]),
@@ -112,12 +127,20 @@ def ingest_ticker(symbol: str, period: str = HISTORY_PERIOD) -> int:
     symbol all accepted) once via `get_or_create_ticker`, and that canonical symbol --
     not the raw input -- is what's used to fetch history, so e.g. passing "reliance"
     fetches RELIANCE.NS rather than asking yfinance for the literal string "reliance".
+
+    Also resolves (and creates, if new) the symbol's permanent Symbol Registry entry and
+    stamps every inserted row with its `internal_id` (Phase 1, spec §7.3/§7.7) -- this is
+    additive to the existing `Ticker`-based flow, not a replacement for it; every
+    existing caller of this function keeps working unchanged.
     """
     with get_session() as session:
         ticker = get_or_create_ticker(session, symbol)
+        registry_entry = get_or_create_symbol_registry_entry(session, ticker.symbol)
         history = fetch_price_history(ticker.symbol, period=period)
-        inserted = upsert_prices(session, ticker, history)
-        logger.info("%s: inserted %d new price rows", ticker.symbol, inserted)
+        inserted = upsert_prices(session, ticker, history, internal_id=registry_entry.internal_id)
+        logger.info(
+            "%s: inserted %d new price rows (internal_id=%s)", ticker.symbol, inserted, registry_entry.internal_id
+        )
         return inserted
 
 

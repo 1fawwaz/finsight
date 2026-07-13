@@ -40,8 +40,8 @@ Complete; resume from the first Pending/In-Progress step.
 | 1. Symbol Registry | **Complete** | `core/symbol_registry.py`, `core/database.py` (+`SymbolRegistry` model), `tests/test_symbol_registry.py` | 11 new, all passing | `5b4c63f` |
 | 2. DB schema & migrations | **Complete** (folded into Step 1 commit — see rationale below) | `core/database.py` (+6 models: `SymbolRegistry`, `CheckpointState`, `ValidationLog`, `ProviderHealth`, `BackupLog`, `MetadataRegistry`), `core/backup.py`, `tests/test_backup.py` | 7 new (backup), migration verified live | `5b4c63f` |
 | 3. Checkpoint system | **Complete** | `core/checkpoint.py`, `tests/test_checkpoint.py` | 10 (9 orig. + 1 added after Step 4's bug fix), all passing | `2ad46af` |
-| 4. Historical backfill | **Complete** | `core/historical_backfill.py`, `tests/test_historical_backfill.py` | 5 new, all passing | see below |
-| 5. Incremental daily ingestion | In progress | | | |
+| 4. Historical backfill | **Complete** | `core/historical_backfill.py`, `tests/test_historical_backfill.py` | 5 new, all passing | `82bd48d` |
+| 5. Incremental daily ingestion | **Complete** | `core/database.py` (+`Price.internal_id`, `_apply_additive_column_migrations`), `core/data_ingestion.py` (extended), `core/symbol_registry.py` (+`backfill_price_internal_ids`), `tests/test_ingestion.py` (+4), `tests/test_price_internal_id_backfill.py` (new, 4) | 8 new, all passing | see below |
 | 6. Nifty100 support | Pending — **blocked on constituent data source, see note below** | | | |
 | 7. Nifty500 support | Pending | | | |
 | 8. Corporate action handling | Pending | | | |
@@ -117,6 +117,40 @@ separate commits, per the spec's "one logical improvement" rule.
   a checkpointed-complete symbol's `.history()` is never re-called), all passing. One
   checkpoint test added after the bug fix (10 total in `test_checkpoint.py`).
 - **Full suite:** 379 passed (373 + 6), 0 regressions.
+
+## Evidence — Step 5
+
+- **Design:** `Price` gained a nullable `internal_id` column (additive, no DB-level
+  UNIQUE constraint — see the in-code comment on `Price.internal_id` for why one isn't
+  added on a live table). `upsert_prices` gained an optional `internal_id` parameter
+  (fully backward compatible — omitting it reproduces byte-identical prior behavior) that,
+  when provided, also dedups across *different* `ticker_id` values sharing the same
+  `internal_id` — the actual case a rename produces. `ingest_ticker`'s public signature
+  is unchanged; it now resolves the Symbol Registry entry internally and passes
+  `internal_id` through automatically.
+- **Real regression found and fixed:** after wiring this in, `tests/test_chat.py` (9
+  tests, which hit the real on-disk DB rather than an in-memory fixture) started failing
+  with `sqlite3.OperationalError: no such column: prices.internal_id`. Root cause:
+  `Base.metadata.create_all()` (used by `init_db()`) only issues `CREATE TABLE IF NOT
+  EXISTS` — it does **not** diff columns on a table that already exists, so a new
+  column on an existing model silently never reaches an already-created database. Fixed
+  by adding `core.database._apply_additive_column_migrations` (an explicit,
+  idempotent `ALTER TABLE ... ADD COLUMN` step, run automatically inside `init_db()`)
+  rather than a one-off manual fix, so the same class of bug can't recur for a future
+  additive column. This is a **repository-wide finding**, not specific to this table —
+  any future additive column on an existing model needs an entry in
+  `_ADDITIVE_COLUMN_MIGRATIONS` or it will silently fail the same way.
+- **Migration evidence against the real DB:**
+  - Backup: `data/backups/finsight_phase1_prices_internal_id_column_migration_20260713_095434.db`, verified.
+  - Column added: `ALTER TABLE prices ADD COLUMN internal_id VARCHAR(32)` — confirmed via
+    `sqlalchemy.inspect` before/after (`internal_id` absent → present).
+  - No data loss: 22,619 `Price` rows before and after.
+  - Data backfilled: `backfill_price_internal_ids()` stamped all 22,619 rows, 0 left
+    unstamped, on the real DB.
+- **Tests:** 8 new (4 in `tests/test_ingestion.py`, 4 in
+  `tests/test_price_internal_id_backfill.py`), all passing.
+- **Full suite:** **387 passed** (379 + 8), 0 regressions, including the 9 `test_chat.py`
+  tests that had been failing.
 
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership

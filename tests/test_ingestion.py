@@ -135,3 +135,79 @@ def test_upsert_prices_skips_rows_with_nan(db_session):
 
     assert inserted == 1
     assert db_session.query(Price).filter(Price.date == date(2024, 1, 2)).one() is not None
+
+
+def test_upsert_prices_stamps_internal_id_when_provided(db_session):
+    ticker = Ticker(symbol="RELIANCE.NS")
+    db_session.add(ticker)
+    db_session.flush()
+
+    history = _make_history(["2024-01-01"])
+    upsert_prices(db_session, ticker, history, internal_id="FIN-0001")
+
+    row = db_session.query(Price).one()
+    assert row.internal_id == "FIN-0001"
+
+
+def test_upsert_prices_without_internal_id_is_unchanged_from_before_phase1(db_session):
+    """Backward-compatibility guarantee: existing callers that don't pass internal_id
+    (e.g. any pre-Phase-1 code path) see byte-identical behavior -- internal_id stays
+    NULL, dedup is still purely by (ticker_id, date)."""
+    ticker = Ticker(symbol="RELIANCE.NS")
+    db_session.add(ticker)
+    db_session.flush()
+
+    history = _make_history(["2024-01-01"])
+    inserted = upsert_prices(db_session, ticker, history)
+
+    assert inserted == 1
+    row = db_session.query(Price).one()
+    assert row.internal_id is None
+
+
+def test_upsert_prices_dedups_across_ticker_rows_sharing_the_same_internal_id(db_session):
+    """The actual identity-safety guarantee spec §7.3 asks for: two different Ticker
+    rows (e.g. an old-symbol row and a post-rename new-symbol row) sharing one
+    internal_id must not produce a duplicate price row for the same trading date."""
+    old_ticker = Ticker(symbol="OLDSYM.NS")
+    new_ticker = Ticker(symbol="NEWSYM.NS")
+    db_session.add_all([old_ticker, new_ticker])
+    db_session.flush()
+
+    history = _make_history(["2024-01-01", "2024-01-02"])
+    first = upsert_prices(db_session, old_ticker, history, internal_id="FIN-0001")
+    # Same trading dates arrive again, but now attributed to the post-rename Ticker row --
+    # a real scenario if a rename happens mid-stream and a caller re-resolves the symbol.
+    second = upsert_prices(db_session, new_ticker, history, internal_id="FIN-0001")
+
+    assert first == 2
+    assert second == 0  # already covered under the same internal_id, via a different ticker_id
+    assert db_session.query(Price).count() == 2
+
+
+def test_ingest_ticker_stamps_internal_id_automatically(temp_db, monkeypatch):
+    """Uses the temp_db fixture (patches core.database.SessionLocal) rather than the
+    bare db_session fixture, since ingest_ticker opens its own session(s) internally --
+    same pattern as tests/test_historical_backfill.py."""
+    monkeypatch.setattr(
+        "core.data_ingestion.yf.Ticker",
+        lambda symbol: type(
+            "T",
+            (),
+            {
+                "info": {"shortName": "Reliance Industries Ltd.", "sector": "Energy"},
+                "history": lambda self, period="5y", auto_adjust=False: _make_history(["2024-01-01", "2024-01-02"]),
+            },
+        )(),
+    )
+
+    from core.data_ingestion import ingest_ticker
+    from core.database import get_session
+
+    inserted = ingest_ticker("RELIANCE.NS")
+
+    assert inserted == 2
+    with get_session() as session:
+        rows = session.query(Price).all()
+        assert len(rows) == 2
+        assert all(r.internal_id is not None and r.internal_id.startswith("FIN-") for r in rows)

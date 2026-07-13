@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from core.config import get_logger
-from core.database import SymbolRegistry, get_session
+from core.database import Price, SymbolRegistry, Ticker, get_session
 from core.universe import resolve_symbol
 
 logger = get_logger(__name__)
@@ -188,8 +188,6 @@ def backfill_registry_from_tickers(session) -> BackfillResult:
     by raw symbol, which must be backfilled with internal_id mappings, not left as-is."
     Idempotent: re-running only creates entries for tickers not yet registered.
     """
-    from core.database import Ticker  # local import: avoids a module-level cycle with core.data_ingestion
-
     tickers = session.execute(select(Ticker)).scalars().all()
     created = 0
     already_present = 0
@@ -208,3 +206,39 @@ def backfill_registry_from_tickers(session) -> BackfillResult:
         created, already_present, len(tickers),
     )
     return BackfillResult(created=created, already_present=already_present, total_tickers=len(tickers))
+
+
+def backfill_price_internal_ids(session) -> int:
+    """Stamp `internal_id` onto every existing `Price` row that doesn't have one yet, by
+    joining `Price.ticker_id -> Ticker.symbol -> SymbolRegistry.current_symbol`. Required
+    retroactively per spec §7.7 (existing data keyed by raw symbol must be backfilled,
+    not left as-is) -- `backfill_registry_from_tickers` must have already run so every
+    `Ticker` has a corresponding registry entry to join against. Idempotent: only rows
+    with `internal_id IS NULL` are touched, so a partial/interrupted run resumes safely
+    without re-scanning already-stamped rows. Returns the number of rows updated.
+    """
+    unstamped = session.execute(select(Price).where(Price.internal_id.is_(None))).scalars().all()
+    updated = 0
+    skipped_no_registry_entry = 0
+    for price in unstamped:
+        ticker = session.get(Ticker, price.ticker_id)
+        if ticker is None:
+            skipped_no_registry_entry += 1
+            continue
+        registry_entry = session.execute(
+            select(SymbolRegistry).where(SymbolRegistry.current_symbol == ticker.symbol)
+        ).scalar_one_or_none()
+        if registry_entry is None:
+            skipped_no_registry_entry += 1
+            continue
+        price.internal_id = registry_entry.internal_id
+        updated += 1
+    session.flush()
+    if skipped_no_registry_entry:
+        logger.warning(
+            "Price internal_id backfill: %d row(s) skipped -- no Symbol Registry entry found for their ticker. "
+            "Run backfill_registry_from_tickers() first.",
+            skipped_no_registry_entry,
+        )
+    logger.info("Price internal_id backfill: %d row(s) stamped, %d unstamped total scanned", updated, len(unstamped))
+    return updated
