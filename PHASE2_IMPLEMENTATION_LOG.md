@@ -48,7 +48,7 @@ do not restart a step marked Complete.
 | 2. Rolling Feature Engineering | **Complete** | `core/ml/feature_pipeline.py` (+`build_features_v3`/`make_dataset_v3`), `tests/test_ml_feature_pipeline.py` (+8) | 8 new, all passing | see below |
 | 3. Sector-Relative Features | **Complete** | `core/ml/sector_features.py` (new), `tests/test_ml_sector_features.py` (new, 6) | 6 new, all passing | see below |
 | 4. Market Breadth | **Complete** | `core/database.py` (+`MarketBreadthDaily`, new table), `core/ml/market_breadth.py` (new), `tests/test_ml_market_breadth.py` (new, 8) | 8 new, all passing | see below |
-| 5. Volatility Features | Pending | | | |
+| 5. Volatility Features | **Complete** | `core/indicators.py` (extended: +5 functions), `tests/test_indicators.py` (+12) | 12 new, all passing | see below |
 | 6. Feature Selection | Pending | | | |
 | 7. Probability Calibration | Pending | | | |
 | 8. Walk-Forward Validation | Pending | | | |
@@ -166,6 +166,35 @@ do not restart a step marked Complete.
   `universe_size=1` for `2026-07-13` (only `RELIANCE.NS` has that day's candle ingested
   so far, per Step 14's evidence run) rather than fabricating full coverage for a date
   most symbols haven't synced yet -- an honest reflection of actual ingestion state.
+
+## Evidence — Step 5
+
+- **Reuse, extend, no duplication:** added directly to `core/indicators.py` (where
+  `atr`/`volatility` already live) rather than a separate module -- `rolling_variance`
+  is proven identical to `volatility()²`, not independently reimplemented.
+- **Real production bug found and fixed:** `volatility_percentile`'s `min_periods`
+  had a hardcoded floor of 20 regardless of the caller's `lookback`, so any
+  `lookback < 20` raised `ValueError: min_periods must be <= window`. Fixed to scale
+  `min_periods` with `lookback`, capped at `lookback` itself, so small windows degrade
+  gracefully instead of crashing.
+- **Test bug found and fixed, not production:** a Yang-Zhang test assumed this test
+  file's `_make_ohlcv` helper produces an `"open"` column (a *different* helper of the
+  same name in `test_ml_feature_pipeline.py` does; this one doesn't) -- fixed by
+  constructing an `open_` series directly in the test.
+- **5 new functions:** `rolling_variance`, `parkinson_volatility` (range-based),
+  `yang_zhang_volatility` (overnight + open-close + Rogers-Satchell components --
+  proven to react to overnight gaps that Parkinson is blind to, and to correctly
+  return ~0 for a perfectly flat series), `volatility_percentile` (relative to the
+  symbol's own history, not a hardcoded absolute level), `volatility_regime`
+  (low/medium/high terciles).
+- **Tests:** 12 new, including formula-level reference checks and two estimators'
+  defining properties tested directly (Parkinson: wider range -> higher vol;
+  Yang-Zhang: gap-sensitive where Parkinson isn't).
+- **Full suite: 506 passed** (494 + 12), 0 regressions.
+- **Real evidence:** computed all 5 estimators for RELIANCE.NS live data --
+  close-to-close (~0.186), Parkinson (~0.158), Yang-Zhang all real and in a sensible
+  range; `volatility_regime` correctly transitions low→medium over the last 5 real
+  trading days as `vol_percentile` crosses the 0.33 tercile boundary.
 
 ## Notes on sequencing vs. the directive's own text
 

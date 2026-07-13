@@ -164,3 +164,88 @@ def support_resistance(high: pd.Series, low: pd.Series, window: int = 20) -> pd.
     resistance = high.rolling(window=window, min_periods=window).max()
     support = low.rolling(window=window, min_periods=window).min()
     return pd.DataFrame({"support": support, "resistance": resistance})
+
+
+# --- Phase 2 Step 5: Volatility Features (extends this module's existing `volatility`/
+# `atr`, does not duplicate them) ------------------------------------------------------
+
+
+def rolling_variance(close: pd.Series, window: int = 20, annualize: bool = True) -> pd.Series:
+    """Rolling variance of simple returns -- `volatility()`'s own building block, exposed
+    directly (variance, not its square root) since some downstream uses (e.g. combining
+    variance estimators, like Yang-Zhang below) need it un-rooted."""
+    rolling_var = returns(close).rolling(window=window, min_periods=window).var()
+    if annualize:
+        rolling_var = rolling_var * 252
+    return rolling_var
+
+
+def parkinson_volatility(high: pd.Series, low: pd.Series, window: int = 20, annualize: bool = True) -> pd.Series:
+    """Parkinson (1980) range-based volatility estimator: uses the high-low range each
+    day rather than only the close, making it more statistically efficient than
+    close-to-close `volatility()` for the same window (at the cost of assuming no
+    overnight gaps, which Yang-Zhang below corrects for)."""
+    log_hl = np.log(high / low)
+    daily_term = log_hl ** 2 / (4 * np.log(2))
+    rolling_mean = daily_term.rolling(window=window, min_periods=window).mean()
+    vol = np.sqrt(rolling_mean)
+    if annualize:
+        vol = vol * (252 ** 0.5)
+    return vol
+
+
+def yang_zhang_volatility(
+    open_: pd.Series, high: pd.Series, low: pd.Series, close: pd.Series, window: int = 20, annualize: bool = True
+) -> pd.Series:
+    """Yang & Zhang (2000) volatility estimator: combines overnight (close-to-open),
+    open-to-close, and a Rogers-Satchell drift-independent range term into a single
+    minimum-variance unbiased estimator -- handles both overnight gaps (which Parkinson
+    ignores) and drift (which naive close-to-close volatility doesn't correct for).
+    """
+    prev_close = close.shift(1)
+    overnight_return = np.log(open_ / prev_close)
+    open_to_close_return = np.log(close / open_)
+    rogers_satchell = np.log(high / close) * np.log(high / open_) + np.log(low / close) * np.log(low / open_)
+
+    overnight_var = overnight_return.rolling(window=window, min_periods=window).var()
+    open_close_var = open_to_close_return.rolling(window=window, min_periods=window).var()
+    rs_mean = rogers_satchell.rolling(window=window, min_periods=window).mean()
+
+    k = 0.34 / (1.34 + (window + 1) / (window - 1))
+    variance = overnight_var + k * open_close_var + (1 - k) * rs_mean
+    # The Rogers-Satchell component can be (rarely) slightly negative in a small/noisy
+    # window even though it's a true variance in expectation -- clip at 0 before sqrt
+    # rather than propagate NaN from an invalid sqrt of a negative number.
+    vol = np.sqrt(variance.clip(lower=0))
+    if annualize:
+        vol = vol * (252 ** 0.5)
+    return vol
+
+
+def volatility_percentile(vol_series: pd.Series, lookback: int = 252) -> pd.Series:
+    """Where today's volatility value ranks (0-1) within its own trailing `lookback`-day
+    history -- e.g. 0.9 means today's volatility is higher than 90% of the last year's
+    values for this same series. Takes an already-computed volatility series (any of the
+    estimators above) rather than raw prices, so it composes with whichever estimator a
+    caller already chose instead of hardcoding one."""
+    # min_periods scales with lookback but must never exceed it -- a hardcoded floor
+    # (e.g. always requiring >=20) would raise ValueError for any caller-supplied
+    # lookback smaller than that floor instead of degrading gracefully.
+    min_periods = min(lookback, max(5, lookback // 5))
+    return vol_series.rolling(window=lookback, min_periods=min_periods).apply(
+        lambda w: pd.Series(w).rank(pct=True).iloc[-1], raw=False
+    )
+
+
+def volatility_regime(vol_percentile: pd.Series, low_threshold: float = 0.33, high_threshold: float = 0.67) -> pd.Series:
+    """Classify a volatility-percentile series into "low"/"medium"/"high" regimes.
+    Thresholds are terciles by default (roughly equal-sized buckets over time), not an
+    arbitrary fixed volatility level -- consistent with using a percentile (relative to
+    the symbol's own history) rather than a hardcoded absolute volatility cutoff that
+    would mean different things for a calm vs. a volatile stock."""
+    regime = pd.Series(pd.NA, index=vol_percentile.index, dtype="object")
+    valid = vol_percentile.notna()
+    regime[valid & (vol_percentile <= low_threshold)] = "low"
+    regime[valid & (vol_percentile > low_threshold) & (vol_percentile <= high_threshold)] = "medium"
+    regime[valid & (vol_percentile > high_threshold)] = "high"
+    return regime

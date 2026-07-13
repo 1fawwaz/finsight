@@ -13,13 +13,18 @@ from core.indicators import (
     ema,
     log_returns,
     macd,
+    parkinson_volatility,
     returns,
+    rolling_variance,
     rsi,
     sma,
     support_resistance,
     true_range,
     volatility,
+    volatility_percentile,
+    volatility_regime,
     vwap,
+    yang_zhang_volatility,
 )
 
 
@@ -259,3 +264,123 @@ def test_support_is_never_above_resistance():
     bands = support_resistance(df["high"], df["low"], window=20)
     valid = bands.dropna()
     assert (valid["support"] <= valid["resistance"]).all()
+
+
+# --- Phase 2 Step 5: Volatility Features -------------------------------------------------
+
+
+def test_rolling_variance_is_volatility_squared():
+    """rolling_variance and volatility share the same underlying rolling std -- variance
+    must equal the annualized volatility squared, not an independently-computed value
+    that could silently drift out of sync."""
+    df = _make_ohlcv(60)
+    var = rolling_variance(df["close"], window=20, annualize=True)
+    vol = volatility(df["close"], window=20, annualize=True)
+    pd.testing.assert_series_equal(var, vol ** 2, check_names=False)
+
+
+def test_rolling_variance_never_negative():
+    df = _make_ohlcv(60)
+    var = rolling_variance(df["close"], window=20)
+    assert (var.dropna() >= 0).all()
+
+
+def test_parkinson_volatility_never_negative():
+    df = _make_ohlcv(60)
+    vol = parkinson_volatility(df["high"], df["low"], window=20)
+    assert (vol.dropna() >= 0).all()
+
+
+def test_parkinson_volatility_matches_manual_formula():
+    df = _make_ohlcv(30)
+    window = 10
+    result = parkinson_volatility(df["high"], df["low"], window=window, annualize=False)
+
+    log_hl = np.log(df["high"] / df["low"])
+    idx = 20
+    window_vals = (log_hl.iloc[idx - window + 1 : idx + 1] ** 2) / (4 * math.log(2))
+    expected = math.sqrt(window_vals.mean())
+    assert result.iloc[idx] == pytest.approx(expected)
+
+
+def test_parkinson_volatility_higher_for_wider_ranges():
+    """A symbol with a consistently wider daily high-low range should show higher
+    Parkinson volatility than one with a narrower range, all else equal."""
+    dates = pd.bdate_range("2023-01-01", periods=30)
+    close = pd.Series([100.0] * 30, index=dates)
+    narrow_high, narrow_low = close + 0.5, close - 0.5
+    wide_high, wide_low = close + 5.0, close - 5.0
+
+    narrow_vol = parkinson_volatility(narrow_high, narrow_low, window=20).dropna()
+    wide_vol = parkinson_volatility(wide_high, wide_low, window=20).dropna()
+
+    assert (wide_vol > narrow_vol).all()
+
+
+def test_yang_zhang_volatility_never_negative():
+    # This file's _make_ohlcv helper doesn't produce an "open" column -- build one
+    # directly rather than assuming a column that isn't there.
+    df = _make_ohlcv(60)
+    rng = np.random.default_rng(8)
+    open_ = df["close"].shift(1).fillna(df["close"].iloc[0]) + rng.normal(0, 0.3, len(df))
+    vol = yang_zhang_volatility(open_, df["high"], df["low"], df["close"], window=20)
+    assert (vol.dropna() >= 0).all()
+
+
+def test_yang_zhang_volatility_zero_for_perfectly_flat_series():
+    """A perfectly flat series (no overnight gap, no intraday range, no drift) has zero
+    true volatility by construction -- the estimator must recognize that exactly, not
+    return a small nonzero artifact from floating-point noise in the formula."""
+    dates = pd.bdate_range("2023-01-01", periods=30)
+    flat = pd.Series([100.0] * 30, index=dates)
+    vol = yang_zhang_volatility(flat, flat, flat, flat, window=20)
+    assert (vol.dropna() < 1e-8).all()
+
+
+def test_yang_zhang_volatility_reacts_to_overnight_gaps():
+    """Parkinson (range-only) is blind to overnight gaps by construction; Yang-Zhang
+    must pick up a real gap-driven volatility Parkinson would miss."""
+    dates = pd.bdate_range("2023-01-01", periods=30)
+    close = pd.Series([100.0] * 30, index=dates)
+    open_flat = close.copy()
+    # Alternate a +/-5% overnight gap every other day; identical, zero-range intraday
+    # bars (open == high == low == close within each day) so Parkinson sees no range at
+    # all, while Yang-Zhang's overnight term must still detect it.
+    open_gapped = close.copy()
+    open_gapped.iloc[1::2] = close.iloc[1::2] * 1.05
+
+    yz_flat = yang_zhang_volatility(open_flat, close, close, close, window=20).dropna()
+    yz_gapped = yang_zhang_volatility(open_gapped, open_gapped, open_gapped, open_gapped, window=20).dropna()
+
+    assert (yz_gapped > yz_flat).all()
+
+
+def test_volatility_percentile_bounded_0_to_1():
+    df = _make_ohlcv(120)
+    vol = volatility(df["close"], window=20)
+    pct = volatility_percentile(vol, lookback=60)
+    valid = pct.dropna()
+    assert (valid >= 0.0).all() and (valid <= 1.0).all()
+
+
+def test_volatility_percentile_is_1_at_the_series_max_so_far():
+    """The single highest volatility value seen so far in the lookback window must rank
+    at (or very near) the top percentile."""
+    vol = pd.Series([0.1, 0.2, 0.15, 0.3, 0.25, 0.5])
+    pct = volatility_percentile(vol, lookback=6)
+    assert pct.iloc[-1] == pytest.approx(1.0)  # 0.5 is the max of the window
+
+
+def test_volatility_regime_classifies_into_three_buckets():
+    pct = pd.Series([0.1, 0.5, 0.9, np.nan])
+    regime = volatility_regime(pct)
+    assert regime.iloc[0] == "low"
+    assert regime.iloc[1] == "medium"
+    assert regime.iloc[2] == "high"
+    assert pd.isna(regime.iloc[3])
+
+
+def test_volatility_regime_thresholds_are_configurable():
+    pct = pd.Series([0.5])
+    assert volatility_regime(pct, low_threshold=0.6, high_threshold=0.8).iloc[0] == "low"
+    assert volatility_regime(pct, low_threshold=0.2, high_threshold=0.4).iloc[0] == "high"
