@@ -11,6 +11,21 @@ for minimal, justified, backward-compatible extensions.
 This file is the single authoritative resume record — read it first in a new session;
 do not restart a step marked Complete.
 
+## STATUS: ALL 12 STEPS COMPLETE (2026-07-13)
+
+All 12 steps implemented, tested against real data, and committed. 14 commits (plus 2
+follow-up fix commits), 583/583 tests passing (456 Phase-1-end baseline + 127 new), 0
+regressions. Full executive summary and Completion Criteria assessment:
+`PHASE2_COMPLETION_REPORT.md`. Final deliverable reports: `ML_BENCHMARK_REPORT.md`,
+`EXPERIMENT_REGISTRY.md`, `FEATURE_IMPORTANCE_REPORT.md`, `CALIBRATION_REPORT.md`,
+`MODEL_COMPARISON_REPORT.md`, `TRAINING_PERFORMANCE_REPORT.md`.
+
+Both real Model Promotion Rule applications this session (feature-set comparison,
+label comparison) correctly **retained the existing champion** — neither challenger
+was statistically superior at the available sample size (5 folds, 1 symbol). This is
+the honest outcome the paired-significance-test design is meant to produce, not an
+incomplete result.
+
 ## Baseline (before Phase 2 work started)
 
 - Git: `finsight` repo, `master`, HEAD `d2b01aa` (Phase 1 Completion Report), working tree clean.
