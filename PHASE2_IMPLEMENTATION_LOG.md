@@ -52,7 +52,7 @@ do not restart a step marked Complete.
 | 6. Feature Selection | **Complete** | `core/database.py` (+`FeatureRegistry`, new table), `core/ml/feature_selection.py` (new), `tests/test_ml_feature_selection.py` (new, 12) | 12 new, all passing | see below |
 | 7. Probability Calibration | **Complete** | `core/ml/calibration.py` (new), `tests/test_ml_calibration.py` (new, 8) | 8 new, all passing | see below |
 | 8. Walk-Forward Validation | **Complete** | `core/ml/walk_forward.py` (new), `tests/test_ml_walk_forward.py` (new, 9) | 9 new, all passing | see below |
-| 9. Time-Series Cross-Validation | Pending | | | |
+| 9. Time-Series Cross-Validation | **Complete** | `core/ml/timeseries_cv.py` (new), `tests/test_ml_timeseries_cv.py` (new, 10) | 10 new, all passing | see below |
 | 10. Feature Importance Monitoring | Pending | | | |
 | 11. Experiment Tracking | Pending | | | |
 | 12. Benchmarking | Pending | | | |
@@ -295,6 +295,35 @@ do not restart a step marked Complete.
 
   Consistent with this project's already-documented near-random-walk finding for daily
   direction -- reported honestly, not massaged.
+
+## Evidence — Step 9
+
+- **Reuse:** `sklearn.model_selection.TimeSeriesSplit` wired in directly (the directive
+  names this exact class), wrapped only to return this codebase's own `CVFold` shape so
+  it composes with the existing leakage-verification machinery -- not reimplemented.
+  `core.ml.training.tune_model_family` (Optuna, Phase 3) reused whole as nested CV's
+  inner loop, not a second tuner.
+- **Test bug found and fixed, not production:** a test asserted sklearn's `gap`
+  parameter shifts the *validation start* forward; sklearn's actual documented
+  behavior pulls the *training end* back instead (validation boundaries are unaffected)
+  -- the wrapper just delegates to `TimeSeriesSplit` directly, so this was purely a
+  wrong assumption in the test, fixed to check the real, correct property.
+- **Nested CV's core guarantee verified directly, not assumed:** a dedicated test
+  confirms outer folds' train/test index sets are disjoint -- the actual mechanism that
+  prevents the inner tuner from ever seeing the outer test fold.
+- **Tests:** 10 new, all passing.
+- **Full suite: 545 passed** (535 + 10), 0 regressions.
+- **Real evidence, RELIANCE.NS's real feature set:**
+  - `TimeSeriesSplit` (5 splits): fold sizes `(199,195), (394,195), (589,195), (784,195),
+    (979,195)` -- correctly expanding, fixed validation block size, exactly sklearn's
+    documented behavior.
+  - Rolling-origin (`min_train_size=800, step=20`): 19 one-step-ahead origins,
+    accuracy=0.5263, precision=0.5000, recall=0.5556.
+  - Nested CV (2 outer folds, 2 inner trials/folds -- deliberately small for a live
+    interactive run, same time-bounding rationale already stated in
+    `core.ml.training`'s own docstring): ran in 2.2s real wall-clock, mean outer-test
+    accuracy 0.4930 -- both outer folds independently selected the same inner
+    hyperparameters, a real (if modest) signal of stability at this tiny trial count.
 
 ## Notes on sequencing vs. the directive's own text
 
