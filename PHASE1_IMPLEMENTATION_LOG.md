@@ -51,7 +51,7 @@ Complete; resume from the first Pending/In-Progress step.
 | 12. Dataset Registry | **Complete** | `core/ml/data_layer.py` (extended `SymbolQualityReport`/`DatasetQualityReport`), `tests/test_ml_data_layer.py` (+2) | 2 new, all passing | see below |
 | 13. Dataset Manifest generation | **Complete** | `core/dataset_manifest.py` (new), `tests/test_dataset_manifest.py` (new, 9) | 9 new, all passing | see below |
 | 14. Provider Health monitoring | **Complete** | `core/provider_health.py` (new), `core/data_ingestion.py` (extended `fetch_price_history`), `tests/test_provider_health.py` (new, 9), `tests/test_ingestion.py` (+2) | 11 new, all passing | see below |
-| 15. Backup and rollback support | Pending (backup primitive pulled forward into Step 2, see below) | | | |
+| 15. Backup and rollback support | **Complete** (file-copy primitive was pulled forward into Step 2; this step completes it) | `core/backup.py` (extended: `trigger` param, `backup_log` persistence, `restore_last_verified_backup`), `tests/test_backup.py` (+6) | 6 new, all passing | see below |
 | 16. Parquet storage | Pending — **new dependency, needs justification per Architecture Change Rule** | | | |
 | 17. Feature Store integration + Acceptance Gate | Pending | | | |
 
@@ -279,6 +279,26 @@ separate commits, per the spec's "one logical improvement" rule.
   `summarize_provider_health` correctly reported `window_calls=1`,
   `success_rate=100.0`, `latency_p50_ms=2280` (a real measured latency), and a current
   `last_successful_sync` timestamp.
+
+## Evidence — Step 15
+
+- **Completes the primitive from Step 2:** `create_backup`/`verify_backup`/
+  `restore_backup` already existed; this step adds `trigger` (closed 2-value enum),
+  `backup_log` persistence for every backup taken (bare filename, matching the
+  `MLModelRegistry.artifact_path` portability convention), `restored_at` tracking, and
+  `restore_last_verified_backup()` (spec §7.13's rollback path).
+- **Test isolation fix along the way:** existing `test_backup.py` tests didn't patch
+  `core.database.SessionLocal`, so the new `backup_log` write inside `create_backup`
+  would have silently hit the *real* on-disk DB during test runs. Added the `temp_db`
+  fixture to every test that now triggers a `backup_log` write, keeping test data out of
+  the real database.
+- **Tests:** 6 new, all passing.
+- **Full suite: 444 passed** (438 + 6), 0 regressions.
+- **Real evidence:** took a real backup against the live DB with
+  `trigger="schema_migration"`; `backup_log` correctly shows exactly **1** row (not
+  retroactively fabricated for the several backups taken earlier this session, before
+  this step's wiring existed) with the right trigger, bare filename, `verified=True`,
+  `restored_at=None`.
 
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership
