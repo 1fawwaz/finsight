@@ -47,7 +47,7 @@ Complete; resume from the first Pending/In-Progress step.
 | 8. Corporate action handling | **Complete** | `core/database.py` (+`Price.dividend`/`split_ratio`), `core/data_ingestion.py` (extended), `core/corporate_actions.py` (new), `tests/test_corporate_actions.py` (new, 6), `tests/test_ingestion.py` (+2) | 8 new, all passing | see below |
 | 9. Survivorship bias protection | **BLOCKED** — same root cause as Step 6; skipped by explicit user direction 2026-07-13 | | | |
 | 10. Validation framework | **Complete** | `core/validation.py` (new), `tests/test_validation.py` (new, 11) | 11 new, all passing | see below |
-| 11. Metadata Registry | Pending | | | |
+| 11. Metadata Registry | **Complete** | `core/metadata_registry.py` (new), `tests/test_metadata_registry.py` (new, 10) | 10 new, all passing | see below |
 | 12. Dataset Registry | Pending | | | |
 | 13. Dataset Manifest generation | Pending | | | |
 | 14. Provider Health monitoring | Pending | | | |
@@ -202,6 +202,27 @@ separate commits, per the spec's "one logical improvement" rule.
     date in the hand-maintained table is inaccurate. **Not resolved here** -- flagged as
     a genuine open finding for follow-up investigation, not guessed at or silently
     dropped from the report.
+
+## Evidence — Step 11
+
+- **Reuse:** thin rollup over `Price` (row counts/dates), `SymbolRegistry` (exchange
+  derived from the current symbol's suffix), and `ValidationLog` (Step 10 -- the latest
+  run's checks determine `validation_status`) -- no new source of truth introduced.
+- **Bug found in a test, not production:** `refresh_metadata` upserts and returns the
+  *same* ORM instance on a second call for the same `internal_id` (mutates in place, per
+  the spec's own "idempotent, always reflects current state" requirement) -- an initial
+  test compared `first.checksum != second.checksum` where `first`/`second` were the same
+  object, always trivially equal after mutation. Fixed by capturing the checksum value
+  immediately after each call rather than holding a reference to the mutable row.
+- **Tests:** 10 new, all passing.
+- **Full suite: 416 passed** (406 + 10), 0 regressions.
+- **Real evidence against the live DB:** refreshed metadata for all 20 real symbols.
+  Row counts range 166–1238 (the two thin ones, `FIN-0014`/`FIN-0016`, correctly match
+  the two symbols already documented as excluded from ML training in
+  `finsight/SESSION_STATE.md` §7 for insufficient history). Only `FIN-0001`
+  (RELIANCE.NS) shows `validation_status=passed` -- correctly reflects that only that
+  symbol has had `run_full_validation` actually run against it so far (Step 10's live
+  test); the other 19 correctly show `not_validated` rather than a fabricated status.
 
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership
