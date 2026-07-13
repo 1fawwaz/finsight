@@ -51,7 +51,7 @@ do not restart a step marked Complete.
 | 5. Volatility Features | **Complete** | `core/indicators.py` (extended: +5 functions), `tests/test_indicators.py` (+12) | 12 new, all passing | see below |
 | 6. Feature Selection | **Complete** | `core/database.py` (+`FeatureRegistry`, new table), `core/ml/feature_selection.py` (new), `tests/test_ml_feature_selection.py` (new, 12) | 12 new, all passing | see below |
 | 7. Probability Calibration | **Complete** | `core/ml/calibration.py` (new), `tests/test_ml_calibration.py` (new, 8) | 8 new, all passing | see below |
-| 8. Walk-Forward Validation | Pending | | | |
+| 8. Walk-Forward Validation | **Complete** | `core/ml/walk_forward.py` (new), `tests/test_ml_walk_forward.py` (new, 9) | 9 new, all passing | see below |
 | 9. Time-Series Cross-Validation | Pending | | | |
 | 10. Feature Importance Monitoring | Pending | | | |
 | 11. Experiment Tracking | Pending | | | |
@@ -261,6 +261,40 @@ do not restart a step marked Complete.
   curve, and the calibration split here is ~235 rows, consistent with the known
   small-sample weakness stated in this module's own docstring. Not a final Step-12
   selection -- flagged as evidence for that step.
+
+## Evidence — Step 8
+
+- **Repository-first finding:** both fold styles the directive asks for already
+  existed under different names -- `core.ml.cv.time_series_cv_folds` (expanding) and
+  `core.backtester.walk_forward_backtest` (rolling, fixed training window). Reused
+  directly; only `rolling_window_folds` (boundary-only, mirroring the backtester's
+  exact slicing so leakage can be verified without duplicating its training loop) and
+  the leakage-report itself are new.
+- **"Verify leakage prevention explicitly, not by assertion"** taken literally:
+  `verify_no_leakage_report` produces a persisted, per-fold DataFrame (train/val date
+  ranges, gap days, pass/fail, failure reason) rather than relying on a bare `assert`
+  that either silently passes or aborts the whole run on the first failure -- every
+  fold's status is retained as evidence, and a deliberately-constructed leaky fold is
+  proven caught and recorded (not raised past the report) in the test suite.
+- **Tests:** 9 new, including a real reuse-correctness check (real
+  `time_series_cv_folds` output always passes the new report) and a real
+  leakage-catching test using a fold object deliberately corrupted via
+  `dataclasses.replace`. All passing.
+- **Full suite: 535 passed** (526 + 9), 0 regressions.
+- **Real evidence, RELIANCE.NS's real 34-feature set, across multiple window
+  configurations, all leakage checks passing:**
+
+  | Style | Config | Folds | Accuracy | Precision | Recall |
+  |---|---|---|---|---|---|
+  | rolling | train=120, test=21 | 50 | 0.5171 | 0.5174 | 0.5636 |
+  | rolling | train=252, test=21 | 43 | 0.4994 | 0.5022 | 0.5110 |
+  | rolling | train=252, test=63 | 14 | 0.4989 | 0.5054 | 0.5190 |
+  | expanding | 3 folds | 3 | 0.4654 | 0.4685 | 0.5036 |
+  | expanding | 5 folds | 5 | 0.5036 | 0.5118 | 0.4986 |
+  | expanding | 10 folds | 10 | 0.5069 | 0.5121 | 0.5189 |
+
+  Consistent with this project's already-documented near-random-walk finding for daily
+  direction -- reported honestly, not massaged.
 
 ## Notes on sequencing vs. the directive's own text
 
