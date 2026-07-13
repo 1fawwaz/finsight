@@ -37,20 +37,27 @@ def get_checkpoint(session) -> CheckpointState:
 
 
 def start_stage(session, stage: str, dataset_version: str | None = None, feature_version: str | None = None) -> CheckpointState:
-    """Begin a new stage, clearing the completed/failed lists from whatever stage came
-    before -- per-stage progress, not a lifetime accumulation across unrelated stages
-    (e.g. "symbols completed during validation" shouldn't linger once ingestion starts).
+    """Enter `stage`. Clears the completed/failed lists only on an actual *transition*
+    to a different stage -- per-stage progress, not a lifetime accumulation across
+    unrelated stages (e.g. "symbols completed during validation" shouldn't linger once
+    ingestion starts). Critically, re-entering the *same* stage (the normal case when a
+    resumed loop's RECONNAISSANCE step re-calls this, per spec §4) is a no-op on the
+    progress lists -- otherwise every resume would erase the very progress checkpointing
+    exists to preserve.
     """
     state = get_checkpoint(session)
+    if state.current_stage != stage:
+        state.completed_internal_ids_json = "[]"
+        state.failed_internal_ids_json = "[]"
+        logger.info("Checkpoint: transitioning stage %r -> %r (progress reset)", state.current_stage, stage)
+    else:
+        logger.info("Checkpoint: resuming stage=%r (progress preserved)", stage)
     state.current_stage = stage
     if dataset_version is not None:
         state.current_dataset_version = dataset_version
     if feature_version is not None:
         state.current_feature_version = feature_version
-    state.completed_internal_ids_json = "[]"
-    state.failed_internal_ids_json = "[]"
     session.flush()
-    logger.info("Checkpoint: started stage=%r (dataset_version=%s, feature_version=%s)", stage, dataset_version, feature_version)
     return state
 
 

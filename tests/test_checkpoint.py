@@ -32,13 +32,25 @@ def test_start_stage_sets_stage_and_versions(db_session):
     assert state.current_feature_version == "features_v2"
 
 
-def test_start_stage_clears_prior_stage_progress(db_session):
+def test_start_stage_clears_progress_on_actual_stage_transition(db_session):
     start_stage(db_session, "validation")
     mark_completed(db_session, "FIN-0001")
     assert is_completed(db_session, "FIN-0001")
 
     start_stage(db_session, "backfill")
     assert is_completed(db_session, "FIN-0001") is False
+
+
+def test_start_stage_preserves_progress_when_resuming_same_stage(db_session):
+    """The critical resumability guarantee: a loop interrupted mid-stage and restarted
+    re-calls start_stage for the *same* stage it was already in (per spec §4
+    RECONNAISSANCE). That must not wipe out the very progress being resumed."""
+    start_stage(db_session, "backfill")
+    mark_completed(db_session, "FIN-0001")
+
+    start_stage(db_session, "backfill")  # simulates a fresh session resuming the same stage
+
+    assert is_completed(db_session, "FIN-0001") is True
 
 
 def test_mark_completed_tracks_last_processed(db_session):

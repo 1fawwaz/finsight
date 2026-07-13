@@ -39,9 +39,9 @@ Complete; resume from the first Pending/In-Progress step.
 |---|---|---|---|---|
 | 1. Symbol Registry | **Complete** | `core/symbol_registry.py`, `core/database.py` (+`SymbolRegistry` model), `tests/test_symbol_registry.py` | 11 new, all passing | `5b4c63f` |
 | 2. DB schema & migrations | **Complete** (folded into Step 1 commit — see rationale below) | `core/database.py` (+6 models: `SymbolRegistry`, `CheckpointState`, `ValidationLog`, `ProviderHealth`, `BackupLog`, `MetadataRegistry`), `core/backup.py`, `tests/test_backup.py` | 7 new (backup), migration verified live | `5b4c63f` |
-| 3. Checkpoint system | **Complete** | `core/checkpoint.py`, `tests/test_checkpoint.py` | 9 new, all passing | `pending` (next commit) |
-| 4. Historical backfill | Pending | | | |
-| 5. Incremental daily ingestion | Pending | | | |
+| 3. Checkpoint system | **Complete** | `core/checkpoint.py`, `tests/test_checkpoint.py` | 10 (9 orig. + 1 added after Step 4's bug fix), all passing | `2ad46af` |
+| 4. Historical backfill | **Complete** | `core/historical_backfill.py`, `tests/test_historical_backfill.py` | 5 new, all passing | see below |
+| 5. Incremental daily ingestion | In progress | | | |
 | 6. Nifty100 support | Pending — **blocked on constituent data source, see note below** | | | |
 | 7. Nifty500 support | Pending | | | |
 | 8. Corporate action handling | Pending | | | |
@@ -97,6 +97,26 @@ separate commits, per the spec's "one logical improvement" rule.
 - **Full suite:** 373 passed (364 + 9), 0 regressions.
 - **Verified against the real DB:** `get_checkpoint()` created the single `id=1` row in
   the live `checkpoint_state` table (not just in-memory test DBs).
+
+## Evidence — Step 4
+
+- **Real bug found and fixed during this step:** `start_stage()` was unconditionally
+  clearing the completed/failed lists on every call, including when re-entering the
+  *same* stage -- which is exactly what a resumed loop does on every RECONNAISSANCE pass
+  (spec §4). This would have silently erased all progress on every resume, defeating the
+  entire point of checkpointing. Fixed to only reset on an actual stage transition;
+  `test_start_stage_preserves_progress_when_resuming_same_stage` guards the fix. Caught
+  by `test_backfill_universe_skips_symbol_already_completed_this_stage` failing during
+  development, not found via inspection -- exactly the "run the relevant tests" step
+  doing its job.
+- **Scope decision:** adjusted close / dividends / splits (also listed under spec §7.2)
+  are deliberately deferred to Step 8 (Corporate action handling) rather than bolted on
+  here, since `prices` has no columns for them yet and adding them now would duplicate
+  work `market_data` (Step 16) is meant to hold properly. Logged, not silently dropped.
+- **Tests:** `tests/test_historical_backfill.py`, 5 new (incl. a resumption test proving
+  a checkpointed-complete symbol's `.history()` is never re-called), all passing. One
+  checkpoint test added after the bug fix (10 total in `test_checkpoint.py`).
+- **Full suite:** 379 passed (373 + 6), 0 regressions.
 
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership
