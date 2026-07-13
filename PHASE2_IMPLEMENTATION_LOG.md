@@ -55,7 +55,7 @@ do not restart a step marked Complete.
 | 9. Time-Series Cross-Validation | **Complete** | `core/ml/timeseries_cv.py` (new), `tests/test_ml_timeseries_cv.py` (new, 10) | 10 new, all passing | see below |
 | 10. Feature Importance Monitoring | **Complete** | `core/database.py` (+`FeatureImportanceSnapshot`, new table), `core/ml/feature_importance_monitoring.py` (new), `tests/test_ml_feature_importance_monitoring.py` (new, 11) | 11 new, all passing | see below |
 | 11. Experiment Tracking | **Complete** | `core/database.py` (extended `MLTrainingRun`, +6 columns), `core/ml/experiment_tracking.py` (new), `tests/test_ml_experiment_tracking.py` (new, 11) | 11 new, all passing | see below |
-| 12. Benchmarking | Pending | | | |
+| 12. Benchmarking | **Complete** | `core/ml/benchmark.py` (new), `tests/test_ml_benchmark.py` (new, 15) | 15 new, all passing | see below |
 
 ## Evidence — Step 1
 
@@ -380,6 +380,54 @@ do not restart a step marked Complete.
   results, feature importance, notes, a real captured git commit hash) against the
   live DB; `get_experiment_history` correctly returns it first (newest) among the 17
   total real `random_forest` experiments now on record.
+
+## Evidence — Step 12
+
+- **Reuse:** `core.portfolio.sharpe_ratio`/`max_drawdown` (trading), `core.ml.calibration
+  .compare_calibration_methods` (calibration), `core.ml.cv.time_series_cv_folds` /
+  `core.ml.walk_forward.rolling_window_folds` (stability), `core.ml.feature_selection
+  .compute_feature_stability` (stability), `core.ml.training.build_model` (all model
+  construction). No new ML framework, storage system, or external API -- no
+  Architecture Change Rule justification needed. Memory is measured via stdlib
+  `tracemalloc`, not a new `psutil` dependency this Windows-hosted project doesn't have.
+- **Real production bug found and fixed:** `core.ml.training.build_model` always
+  injects its own fixed `random_state` for every model family and raises `TypeError` on
+  a duplicate keyword if `params` also contains one. Every direct `build_model` call in
+  this new module hit that immediately. Fixed with `_build_model_safe`, a thin wrapper
+  that strips `random_state` from `params` before delegating, and applies a
+  caller-specified seed by setting the attribute directly afterward -- needed for the
+  stability category's own seed-sensitivity check, which is meaningless with a
+  hardcoded seed.
+- **Statistical rigor, not just a numeric comparison:** `evaluate_model_promotion` uses
+  a paired Wilcoxon signed-rank test on matched per-fold ROC-AUC values (not a simple
+  "is the mean higher" check), with explicit dedicated tests proving identical fold
+  metrics are never treated as superior (a tie), and that a clearly, consistently
+  superior challenger *is* correctly detected (p<0.05) -- both directions verified, not
+  assumed. Calibration/walk-forward/latency gates are tested independently, including a
+  case where a statistically superior challenger is still correctly rejected for
+  exceeding the latency bound.
+- **Tests:** 15 new, all passing.
+- **Full suite: 582 passed** (567 + 15), 0 regressions.
+- **Real evidence and an honest promotion decision:** benchmarked the **original
+  9-feature set** (`core.ml_model.build_features`, a fair, leakage-free proxy for
+  "the pre-Phase-2 feature set" -- retrained fresh per fold, avoiding the frozen-
+  registry-artifact leakage problem a pre-trained model would have on these same
+  historical folds) as the champion candidate against the **new Phase 2 34-feature
+  set** as the challenger, both on real RELIANCE.NS data, both retrained across the
+  same 5 chronological folds:
+
+  | | Fold ROC-AUC | Test-set ROC-AUC |
+  |---|---|---|
+  | Champion (9 features) | `[0.5141, 0.4161, 0.4757, 0.5149, 0.5172]` | 0.4523 |
+  | Challenger (34 features) | `[0.5225, 0.4526, 0.4751, 0.5360, 0.4874]` | 0.5157 |
+
+  Paired Wilcoxon signed-rank test: **p=0.3125** (> 0.05 alpha) →
+  **not statistically superior**, despite a numerically higher test-set ROC-AUC and a
+  higher fold value in 3/5 folds. **Decision: RETAIN CHAMPION.** This is exactly the
+  honest outcome the Model Promotion Rule exists to produce -- a numerically-higher
+  candidate is correctly *not* promoted when the evidence across only 5 folds doesn't
+  support statistical confidence, consistent with the directive's own tie-breaking
+  rule ("simplicity and stability win ties").
 
 ## Notes on sequencing vs. the directive's own text
 
