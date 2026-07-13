@@ -52,7 +52,7 @@ Complete; resume from the first Pending/In-Progress step.
 | 13. Dataset Manifest generation | **Complete** | `core/dataset_manifest.py` (new), `tests/test_dataset_manifest.py` (new, 9) | 9 new, all passing | see below |
 | 14. Provider Health monitoring | **Complete** | `core/provider_health.py` (new), `core/data_ingestion.py` (extended `fetch_price_history`), `tests/test_provider_health.py` (new, 9), `tests/test_ingestion.py` (+2) | 11 new, all passing | see below |
 | 15. Backup and rollback support | **Complete** (file-copy primitive was pulled forward into Step 2; this step completes it) | `core/backup.py` (extended: `trigger` param, `backup_log` persistence, `restore_last_verified_backup`), `tests/test_backup.py` (+6) | 6 new, all passing | see below |
-| 16. Parquet storage | Pending — **new dependency, needs justification per Architecture Change Rule** | | | |
+| 16. Parquet storage | **Complete** | `core/parquet_store.py` (new), `requirements.txt` (+`pyarrow==25.0.0`, pinned explicitly), `tests/test_parquet_store.py` (new, 10) | 10 new, all passing | see below |
 | 17. Feature Store integration + Acceptance Gate | Pending | | | |
 
 **Rationale for folding Step 2 into Step 1:** `SymbolRegistry` itself *is* a schema
@@ -299,6 +299,31 @@ separate commits, per the spec's "one logical improvement" rule.
   retroactively fabricated for the several backups taken earlier this session, before
   this step's wiring existed) with the right trigger, bare filename, `verified=True`,
   `restored_at=None`.
+
+## Evidence — Step 16
+
+- **Architecture Change Rule justification (stated, not assumed):** `pyarrow` was
+  already present transitively (pandas' Parquet engine) at `25.0.0` -- confirmed via
+  direct import, not assumed -- and is now pinned explicitly in `requirements.txt`
+  rather than relied on implicitly. No existing dependency provides columnar file I/O;
+  SQLite's row-oriented `prices` table is the exact bottleneck spec §7.14 names for ML
+  training reads at scale.
+- **Scope decision, stated not hidden:** SQLite `prices` remains the live, actively-
+  written system of record; Parquet is a *derived*, explicitly-synced read-optimized
+  export (`sync_from_sqlite`), not a live dual-write on every ingest. A full cutover
+  (retiring `prices` in favor of `market_data`) is materially larger and riskier than
+  this step's scope -- logged as future work in `docs/ROADMAP.md`-adjacent territory,
+  not silently attempted.
+- **Partitioning:** `internal_id/year`, matching the decision already recorded in
+  `docs/DATA_SOURCE.md` §6 -- not re-decided here.
+- **Tests:** 10 new, all passing, including round-trip fidelity, multi-year-partition
+  reads, start/end filtering, and idempotent re-sync.
+- **Full suite: 454 passed** (444 + 10), 0 regressions.
+- **Real evidence:** synced all 20 real symbols from the live SQLite `prices` table to
+  Parquet -- 23,105 total rows written across 6 year-partitions per long-history symbol
+  (2 for the two known-thin symbols), 1.6 MB on disk. Read back `FIN-0001`
+  (RELIANCE.NS): 1,239 rows, correct columns, and the most recent row matches the real
+  `2026-07-13` candle ingested live during Step 14's evidence run.
 
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership
