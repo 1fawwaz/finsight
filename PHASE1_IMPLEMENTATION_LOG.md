@@ -48,7 +48,7 @@ Complete; resume from the first Pending/In-Progress step.
 | 9. Survivorship bias protection | **BLOCKED** — same root cause as Step 6; skipped by explicit user direction 2026-07-13 | | | |
 | 10. Validation framework | **Complete** | `core/validation.py` (new), `tests/test_validation.py` (new, 11) | 11 new, all passing | see below |
 | 11. Metadata Registry | **Complete** | `core/metadata_registry.py` (new), `tests/test_metadata_registry.py` (new, 10) | 10 new, all passing | see below |
-| 12. Dataset Registry | Pending | | | |
+| 12. Dataset Registry | **Complete** | `core/ml/data_layer.py` (extended `SymbolQualityReport`/`DatasetQualityReport`), `tests/test_ml_data_layer.py` (+2) | 2 new, all passing | see below |
 | 13. Dataset Manifest generation | Pending | | | |
 | 14. Provider Health monitoring | Pending | | | |
 | 15. Backup and rollback support | Pending (backup primitive pulled forward into Step 2, see below) | | | |
@@ -223,6 +223,21 @@ separate commits, per the spec's "one logical improvement" rule.
   (RELIANCE.NS) shows `validation_status=passed` -- correctly reflects that only that
   symbol has had `run_full_validation` actually run against it so far (Step 10's live
   test); the other 19 correctly show `not_validated` rather than a fabricated status.
+
+## Evidence — Step 12
+
+- **Reuse, extend, no duplication:** `core.ml.data_layer.create_dataset_version`,
+  `SymbolQualityReport`, and `DatasetQualityReport` (Phase 3, existing) were extended in
+  place -- both dataclass additions default to backward-compatible values, so no
+  existing caller breaks.
+- **Constituent history handled honestly:** rather than adding a column/field for data
+  that fundamentally can't exist yet (blocked, Steps 6/7/9), the manifest JSON states
+  `"constituent_history": "not_available -- blocked pending..."` explicitly. A reader of
+  a dataset version's quality report can never mistake this version for
+  survivorship-bias-safe.
+- **Tests:** 2 new, both passing; all 14 pre-existing `test_ml_data_layer.py` tests
+  still pass unchanged.
+- **Full suite: 418 passed** (416 + 2), 0 regressions.
 
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership

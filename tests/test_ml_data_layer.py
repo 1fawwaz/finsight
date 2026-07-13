@@ -143,6 +143,36 @@ def test_create_dataset_version_persists_retrievable_metadata(temp_db):
     assert fetched.symbol_count == 1
 
 
+def test_create_dataset_version_stamps_internal_id_per_symbol(temp_db):
+    """Phase 1: every symbol report in the persisted quality JSON carries its permanent
+    internal_id, and the aggregate included_internal_ids list is derivable from it --
+    spec §7.9's "internal_id set covered" requirement."""
+    with get_session() as session:
+        _seed_ticker_with_history(session, "GOOD.NS", 600)
+
+    version = create_dataset_version(["GOOD.NS"], version_name="test_v_internal_id")
+
+    quality = json.loads(version.quality_report_json)
+    good_report = next(r for r in quality["symbol_reports"] if r["symbol"] == "GOOD.NS")
+    assert good_report["internal_id"] is not None
+    assert good_report["internal_id"].startswith("FIN-")
+    assert good_report["internal_id"] in quality["included_internal_ids"]
+
+
+def test_create_dataset_version_states_constituent_history_is_unavailable(temp_db):
+    """Phase 1: rather than silently omitting point-in-time constituent history (spec
+    §7.6, blocked pending an authoritative Nifty index-membership source), the manifest
+    JSON says so explicitly -- a reader must never assume this dataset version is
+    survivorship-bias-safe just because the field exists and looks populated."""
+    with get_session() as session:
+        _seed_ticker_with_history(session, "GOOD.NS", 600)
+
+    version = create_dataset_version(["GOOD.NS"], version_name="test_v_constituent_note")
+
+    quality = json.loads(version.quality_report_json)
+    assert "not_available" in quality["constituent_history"]
+
+
 def test_load_dataset_reproduces_the_same_rows(temp_db):
     with get_session() as session:
         _seed_ticker_with_history(session, "GOOD.NS", 600)

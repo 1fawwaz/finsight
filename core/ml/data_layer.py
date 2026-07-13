@@ -28,6 +28,7 @@ from core.config import get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
 from core.database import MLDatasetVersion, Price, Ticker, get_session
 from core.queries import get_price_history
+from core.symbol_registry import get_or_create as get_or_create_symbol_registry_entry
 
 logger = get_logger(__name__)
 
@@ -52,6 +53,10 @@ class SymbolQualityReport:
     outlier_days: list[str] = field(default_factory=list)
     included_in_dataset: bool = True
     exclusion_reason: str | None = None
+    # Phase 1 (additive, default None so this dataclass stays backward compatible for
+    # any existing caller constructing one without it): the symbol's permanent identity,
+    # per docs/FINSIGHT_PHASE1_PHASE2_AGENT_SPEC.md §7.9 ("the internal_id set covered").
+    internal_id: str | None = None
 
 
 @dataclass
@@ -64,15 +69,28 @@ class DatasetQualityReport:
     included_symbols: list[str]
     excluded_symbols: list[str]
 
+    @property
+    def included_internal_ids(self) -> list[str]:
+        return [r.internal_id for r in self.symbol_reports if r.included_in_dataset and r.internal_id is not None]
+
     def to_json(self) -> str:
         return json.dumps(
             {
                 "total_rows": self.total_rows,
                 "included_symbols": self.included_symbols,
                 "excluded_symbols": self.excluded_symbols,
+                "included_internal_ids": self.included_internal_ids,
+                # Point-in-time index constituent history (spec §7.6) is not tracked --
+                # blocked on an authoritative Nifty constituent-membership dataset that
+                # does not exist in this repository (Phase 1 Steps 6/7/9, recorded as
+                # blocked in finsight/PHASE1_IMPLEMENTATION_LOG.md). Stated explicitly
+                # here rather than silently omitted, so a manifest reader never assumes
+                # this dataset version is survivorship-bias-safe when it isn't.
+                "constituent_history": "not_available -- blocked pending an authoritative Nifty index-constituent dataset (see PHASE1_IMPLEMENTATION_LOG.md)",
                 "symbol_reports": [
                     {
                         "symbol": r.symbol,
+                        "internal_id": r.internal_id,
                         "row_count": r.row_count,
                         "schema_valid": r.schema_valid,
                         "duplicate_dates": r.duplicate_dates,
@@ -210,6 +228,8 @@ def create_dataset_version(symbols: list[str], version_name: str | None = None) 
     for symbol in symbols:
         history = get_price_history(symbol)
         report = validate_symbol_history(symbol, history)
+        with get_session() as session:
+            report.internal_id = get_or_create_symbol_registry_entry(session, symbol).internal_id
         symbol_reports.append(report)
         if report.included_in_dataset:
             included_symbols.append(symbol)
