@@ -474,6 +474,22 @@ class FeatureRegistry(Base):
     decided_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class FeatureImportanceSnapshot(Base):
+    """Phase 2 Step 10: one row per (experiment, feature, importance type) --
+    persisted so importance can be tracked *over time* across experiments, which
+    none of the existing Phase 3 evaluation artifacts (JSON+PNG files, one per
+    training run) support querying across runs."""
+
+    __tablename__ = "feature_importance_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    experiment_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    feature_name: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    importance_type: Mapped[str] = mapped_column(String(16), nullable=False)  # "permutation", "shap", or "gain"
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+
+
 _engine = create_engine(DATABASE_URL, echo=False, future=True)
 SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
 

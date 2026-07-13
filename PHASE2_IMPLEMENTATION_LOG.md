@@ -53,7 +53,7 @@ do not restart a step marked Complete.
 | 7. Probability Calibration | **Complete** | `core/ml/calibration.py` (new), `tests/test_ml_calibration.py` (new, 8) | 8 new, all passing | see below |
 | 8. Walk-Forward Validation | **Complete** | `core/ml/walk_forward.py` (new), `tests/test_ml_walk_forward.py` (new, 9) | 9 new, all passing | see below |
 | 9. Time-Series Cross-Validation | **Complete** | `core/ml/timeseries_cv.py` (new), `tests/test_ml_timeseries_cv.py` (new, 10) | 10 new, all passing | see below |
-| 10. Feature Importance Monitoring | Pending | | | |
+| 10. Feature Importance Monitoring | **Complete** | `core/database.py` (+`FeatureImportanceSnapshot`, new table), `core/ml/feature_importance_monitoring.py` (new), `tests/test_ml_feature_importance_monitoring.py` (new, 11) | 11 new, all passing | see below |
 | 11. Experiment Tracking | Pending | | | |
 | 12. Benchmarking | Pending | | | |
 
@@ -324,6 +324,33 @@ do not restart a step marked Complete.
     `core.ml.training`'s own docstring): ran in 2.2s real wall-clock, mean outer-test
     accuracy 0.4930 -- both outer folds independently selected the same inner
     hyperparameters, a real (if modest) signal of stability at this tiny trial count.
+
+## Evidence — Step 10
+
+- **New table justified:** `feature_importance_snapshots` -- Phase 3's evaluation
+  artifacts (`core.ml.evaluation`) write one JSON+PNG per run, not a queryable
+  cross-run time series. Reuses `core.ml.feature_selection.compute_mutual_information`
+  (as a stand-in permutation-style signal for this evidence run) and is designed to
+  accept the output of `compute_permutation_importance`/`generate_feature_importance`/
+  `generate_shap_summary` directly (all Phase 3/Step 6 functions, not recomputed here).
+- **Tests:** 11 new, all passing, including a zero-baseline drift case (handled as
+  `+inf`, not a crash or a fabricated finite number) and independence between
+  importance types for the same feature.
+- **Full suite: 556 passed** (545 + 11), 0 regressions.
+- **Migration evidence:** backup
+  `data/backups/finsight_phase2_feature_importance_snapshots_schema_migration_20260713_120649.db`,
+  verified; new table confirmed via `sqlalchemy.inspect`.
+- **Real evidence, and an honest finding worth flagging:** recorded two real snapshots
+  for RELIANCE.NS (mutual information on a 600-row vs. the full 1,174-row feature set)
+  and ran drift detection at the default 50% threshold -- **all 34/34 features were
+  flagged as significant drift.** This is a genuine result, not a bug, but it exposes a
+  real calibration question: importance measures on this small a dataset are
+  substantially noisy run-to-run (consistent with Step 6's own finding that permutation
+  importance has real sampling variance), and comparing two quite different-sized data
+  slices is a more dramatic shift than a typical same-model, adjacent-time-period
+  comparison would show. **Not resolved here** -- logged as a real open question for
+  Step 12 (which importance type and threshold are actually reliable for alerting)
+  rather than silently tuning the threshold to produce a quieter, more reassuring demo.
 
 ## Notes on sequencing vs. the directive's own text
 
