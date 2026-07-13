@@ -103,6 +103,13 @@ def upsert_prices(session, ticker: Ticker, history: pd.DataFrame, internal_id: s
             continue
         if any(pd.isna(row[col]) for col in ("Open", "High", "Low", "Close", "Volume")):
             continue
+        # "Dividends"/"Stock Splits" are present whenever the caller fetched with
+        # yfinance's default actions=True (core.data_ingestion.fetch_price_history does
+        # not override it) -- captured here if present, defensively absent otherwise
+        # (e.g. a caller-supplied DataFrame in a test). 0.0 is normalized to None: "no
+        # corporate action recorded on this date", not "a zero-value action".
+        dividend = row.get("Dividends")
+        split_ratio = row.get("Stock Splits")
         session.add(
             Price(
                 ticker_id=ticker.id,
@@ -113,6 +120,8 @@ def upsert_prices(session, ticker: Ticker, history: pd.DataFrame, internal_id: s
                 low=float(row["Low"]),
                 close=float(row["Close"]),
                 volume=int(row["Volume"]),
+                dividend=float(dividend) if dividend not in (None, 0, 0.0) and not pd.isna(dividend) else None,
+                split_ratio=float(split_ratio) if split_ratio not in (None, 0, 0.0) and not pd.isna(split_ratio) else None,
             )
         )
         existing_dates.add(bar_date)

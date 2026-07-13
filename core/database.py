@@ -85,6 +85,12 @@ class Price(Base):
     low: Mapped[float] = mapped_column(Float, nullable=False)
     close: Mapped[float] = mapped_column(Float, nullable=False)
     volume: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Phase 1 Step 8 (additive): captured from yfinance's own "Dividends"/"Stock Splits"
+    # columns (present by default -- yfinance's history() defaults to actions=True,
+    # confirmed via PriceHistory.history's signature -- but previously discarded here).
+    # NULL/absent means "no corporate action recorded on this date", not "unknown".
+    dividend: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    split_ratio: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     ticker: Mapped["Ticker"] = relationship(back_populates="prices")
 
@@ -433,6 +439,8 @@ SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
 _ADDITIVE_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
     # (table_name, column_name, column_ddl)
     ("prices", "internal_id", "VARCHAR(32)"),
+    ("prices", "dividend", "FLOAT"),
+    ("prices", "split_ratio", "FLOAT"),
 ]
 
 

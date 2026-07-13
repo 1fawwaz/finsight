@@ -42,10 +42,10 @@ Complete; resume from the first Pending/In-Progress step.
 | 3. Checkpoint system | **Complete** | `core/checkpoint.py`, `tests/test_checkpoint.py` | 10 (9 orig. + 1 added after Step 4's bug fix), all passing | `2ad46af` |
 | 4. Historical backfill | **Complete** | `core/historical_backfill.py`, `tests/test_historical_backfill.py` | 5 new, all passing | `82bd48d` |
 | 5. Incremental daily ingestion | **Complete** | `core/database.py` (+`Price.internal_id`, `_apply_additive_column_migrations`), `core/data_ingestion.py` (extended), `core/symbol_registry.py` (+`backfill_price_internal_ids`), `tests/test_ingestion.py` (+4), `tests/test_price_internal_id_backfill.py` (new, 4) | 8 new, all passing | see below |
-| 6. Nifty100 support | Pending — **blocked on constituent data source, see note below** | | | |
-| 7. Nifty500 support | Pending | | | |
-| 8. Corporate action handling | Pending | | | |
-| 9. Survivorship bias protection | Pending | | | |
+| 6. Nifty100 support | **BLOCKED** — no authoritative index-constituent dataset (see below); skipped by explicit user direction 2026-07-13 | | | |
+| 7. Nifty500 support | **BLOCKED** — same root cause as Step 6; skipped by explicit user direction 2026-07-13 | | | |
+| 8. Corporate action handling | **Complete** | `core/database.py` (+`Price.dividend`/`split_ratio`), `core/data_ingestion.py` (extended), `core/corporate_actions.py` (new), `tests/test_corporate_actions.py` (new, 6), `tests/test_ingestion.py` (+2) | 8 new, all passing | see below |
+| 9. Survivorship bias protection | **BLOCKED** — same root cause as Step 6; skipped by explicit user direction 2026-07-13 | | | |
 | 10. Validation framework | Pending | | | |
 | 11. Metadata Registry | Pending | | | |
 | 12. Dataset Registry | Pending | | | |
@@ -151,6 +151,28 @@ separate commits, per the spec's "one logical improvement" rule.
   `tests/test_price_internal_id_backfill.py`), all passing.
 - **Full suite:** **387 passed** (379 + 8), 0 regressions, including the 9 `test_chat.py`
   tests that had been failing.
+
+## Evidence — Step 8
+
+- **Repository evidence used:** `yfinance.scrapers.history.PriceHistory.history`'s real
+  signature (`actions=True` by default) confirmed the "Dividends"/"Stock Splits" columns
+  were already present in every fetch `core.data_ingestion.fetch_price_history` makes --
+  just previously discarded. Captured them via the same `_ADDITIVE_COLUMN_MIGRATIONS`
+  mechanism built during Step 5's regression fix (reused immediately, as intended).
+- **Scope decision, stated not hidden:** full backward-adjusted price series
+  recomputation is out of scope -- `core/corporate_actions.py` validates *consistency*
+  (a >15% move should have a recorded action explaining it) rather than re-deriving
+  yfinance's own adjustment math from scratch, which is a materially riskier, separate
+  undertaking.
+- **Migration evidence:** backup
+  `data/backups/finsight_phase1_corporate_action_columns_migration_20260713_100608.db`,
+  verified; `dividend`/`split_ratio` columns added via the additive-migration mechanism;
+  22,619 `Price` rows preserved (no data loss).
+- **Tests:** 8 new (6 `test_corporate_actions.py`, 2 `test_ingestion.py`), all passing.
+  One test-fixture bug found and fixed during development (a hardcoded `ticker_id=1` in
+  a test helper collided with the real `UNIQUE(ticker_id, date)` constraint across two
+  different symbols in one test -- a test bug, not a production one).
+- **Full suite: 395 passed** (387 + 8), 0 regressions.
 
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership

@@ -10,18 +10,20 @@ from core.data_ingestion import IngestionError, _validate_history, get_or_create
 from core.database import Price, Ticker
 
 
-def _make_history(dates: list[str]) -> pd.DataFrame:
+def _make_history(dates: list[str], dividends: list[float] | None = None, splits: list[float] | None = None) -> pd.DataFrame:
     index = pd.to_datetime(dates)
-    return pd.DataFrame(
-        {
-            "Open": [100.0 + i for i in range(len(dates))],
-            "High": [101.0 + i for i in range(len(dates))],
-            "Low": [99.0 + i for i in range(len(dates))],
-            "Close": [100.5 + i for i in range(len(dates))],
-            "Volume": [1_000_000 + i for i in range(len(dates))],
-        },
-        index=index,
-    )
+    data = {
+        "Open": [100.0 + i for i in range(len(dates))],
+        "High": [101.0 + i for i in range(len(dates))],
+        "Low": [99.0 + i for i in range(len(dates))],
+        "Close": [100.5 + i for i in range(len(dates))],
+        "Volume": [1_000_000 + i for i in range(len(dates))],
+    }
+    if dividends is not None:
+        data["Dividends"] = dividends
+    if splits is not None:
+        data["Stock Splits"] = splits
+    return pd.DataFrame(data, index=index)
 
 
 def test_validate_history_rejects_empty():
@@ -183,6 +185,42 @@ def test_upsert_prices_dedups_across_ticker_rows_sharing_the_same_internal_id(db
     assert first == 2
     assert second == 0  # already covered under the same internal_id, via a different ticker_id
     assert db_session.query(Price).count() == 2
+
+
+def test_upsert_prices_captures_dividends_and_splits_when_present(db_session):
+    ticker = Ticker(symbol="RELIANCE.NS")
+    db_session.add(ticker)
+    db_session.flush()
+
+    history = _make_history(
+        ["2024-01-01", "2024-01-02", "2024-01-03"],
+        dividends=[0.0, 5.5, 0.0],
+        splits=[0.0, 0.0, 2.0],
+    )
+    upsert_prices(db_session, ticker, history)
+
+    rows = {r.date: r for r in db_session.query(Price).all()}
+    assert rows[date(2024, 1, 1)].dividend is None
+    assert rows[date(2024, 1, 1)].split_ratio is None
+    assert rows[date(2024, 1, 2)].dividend == 5.5
+    assert rows[date(2024, 1, 2)].split_ratio is None
+    assert rows[date(2024, 1, 3)].split_ratio == 2.0
+
+
+def test_upsert_prices_without_dividends_splits_columns_still_works(db_session):
+    """Backward compatible: a caller-supplied DataFrame without Dividends/Stock Splits
+    columns (e.g. existing tests, or a manually constructed frame) must not crash."""
+    ticker = Ticker(symbol="RELIANCE.NS")
+    db_session.add(ticker)
+    db_session.flush()
+
+    history = _make_history(["2024-01-01"])  # no dividends/splits columns at all
+    inserted = upsert_prices(db_session, ticker, history)
+
+    assert inserted == 1
+    row = db_session.query(Price).one()
+    assert row.dividend is None
+    assert row.split_ratio is None
 
 
 def test_ingest_ticker_stamps_internal_id_automatically(temp_db, monkeypatch):
