@@ -44,7 +44,7 @@ do not restart a step marked Complete.
 
 | Step | Status | Files | Tests | Commit |
 |---|---|---|---|---|
-| 1. Better Labels | **Implemented; selection PROVISIONAL pending Step 12** | `core/ml/labels.py` (new), `tests/test_ml_labels.py` (new, 16) | 16 new, all passing | see below |
+| 1. Better Labels | **Complete — evidence-selected via Step 12** (see addendum after Step 12's evidence) | `core/ml/labels.py` (new), `tests/test_ml_labels.py` (new, 16) | 16 new, all passing | see below |
 | 2. Rolling Feature Engineering | **Complete** | `core/ml/feature_pipeline.py` (+`build_features_v3`/`make_dataset_v3`), `tests/test_ml_feature_pipeline.py` (+8) | 8 new, all passing | see below |
 | 3. Sector-Relative Features | **Complete** | `core/ml/sector_features.py` (new), `tests/test_ml_sector_features.py` (new, 6) | 6 new, all passing | see below |
 | 4. Market Breadth | **Complete** | `core/database.py` (+`MarketBreadthDaily`, new table), `core/ml/market_breadth.py` (new), `tests/test_ml_market_breadth.py` (new, 8) | 8 new, all passing | see below |
@@ -428,6 +428,38 @@ do not restart a step marked Complete.
   candidate is correctly *not* promoted when the evidence across only 5 folds doesn't
   support statistical confidence, consistent with the directive's own tie-breaking
   rule ("simplicity and stability win ties").
+
+## Addendum — Step 1 label selection, closed via Step 12's benchmark suite
+
+Step 1's own text deferred final label selection to Step 12's evidence. After Step 12's
+tooling existed, a real bug in `run_full_benchmark` (see Step 12 evidence: it assumed
+`features`/`labels` were already aligned, which a `to_binary()`-collapsed label
+violates) was found and fixed while attempting exactly this comparison -- caught by
+running the real comparison, not by a test that happened to avoid the case.
+
+**Real evidence, RELIANCE.NS, 34-feature set, RandomForest, 5 chronological folds each:**
+
+| Label | Fold ROC-AUC | Test ROC-AUC | ECE | Sharpe |
+|---|---|---|---|---|
+| `fixed_horizon_1d` (current) | `[0.5225, 0.4526, 0.4751, 0.5360, 0.4874]` | 0.5157 | 0.0426 | -0.1757 |
+| `atr_adjusted_1d` | `[0.5282, 0.4127, 0.4416, 0.5352, 0.5335]` | 0.5139 | **0.0027** | **0.7156** |
+| `triple_barrier_10d` | `[0.6216, 0.6797, 0.3047, 0.6073, 0.4475]` | 0.4940 | 0.0366 | -0.2631 |
+
+Paired Wilcoxon signed-rank test (vs. `fixed_horizon_1d`): `atr_adjusted_1d` p=0.594,
+`triple_barrier_10d` p=0.3125 -- **neither statistically superior** on the primary
+metric (ROC-AUC) at only 5 folds.
+
+**Decision: RETAIN `fixed_horizon_1d`** as the label (matches current production). Not
+because it's proven best -- because no alternative cleared the statistical bar with the
+available evidence, and per the directive's own tie-breaking rule, ties favor the
+simpler, already-in-production choice.
+
+**Worth flagging, not silently discarded:** `atr_adjusted_1d` shows a materially better
+calibration (ECE 0.0027 vs 0.0426) and a much better trading-simulation Sharpe (0.72 vs
+-0.18) despite similar ROC-AUC -- an interesting real signal that didn't reach
+significance at this sample size (5 folds, ~1,170 rows, single symbol). Logged as a
+genuine candidate for future investigation with more data (more symbols and/or more
+folds), not a conclusion to act on now.
 
 ## Notes on sequencing vs. the directive's own text
 
