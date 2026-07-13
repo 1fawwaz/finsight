@@ -54,7 +54,7 @@ do not restart a step marked Complete.
 | 8. Walk-Forward Validation | **Complete** | `core/ml/walk_forward.py` (new), `tests/test_ml_walk_forward.py` (new, 9) | 9 new, all passing | see below |
 | 9. Time-Series Cross-Validation | **Complete** | `core/ml/timeseries_cv.py` (new), `tests/test_ml_timeseries_cv.py` (new, 10) | 10 new, all passing | see below |
 | 10. Feature Importance Monitoring | **Complete** | `core/database.py` (+`FeatureImportanceSnapshot`, new table), `core/ml/feature_importance_monitoring.py` (new), `tests/test_ml_feature_importance_monitoring.py` (new, 11) | 11 new, all passing | see below |
-| 11. Experiment Tracking | Pending | | | |
+| 11. Experiment Tracking | **Complete** | `core/database.py` (extended `MLTrainingRun`, +6 columns), `core/ml/experiment_tracking.py` (new), `tests/test_ml_experiment_tracking.py` (new, 11) | 11 new, all passing | see below |
 | 12. Benchmarking | Pending | | | |
 
 ## Evidence — Step 1
@@ -351,6 +351,35 @@ do not restart a step marked Complete.
   comparison would show. **Not resolved here** -- logged as a real open question for
   Step 12 (which importance type and threshold are actually reliable for alerting)
   rather than silently tuning the threshold to produce a quieter, more reassuring demo.
+
+## Evidence — Step 11
+
+- **Reuse, extend, no parallel table:** `ml_training_runs` (Phase 3's `MLTrainingRun`,
+  already the per-trial experiment log) extended additively with the 6 fields the
+  directive's field list needed and Phase 3 didn't track (git commit, training
+  duration, prediction latency, calibration results, feature importance, notes) --
+  applied via the same `_apply_additive_column_migrations` mechanism built in Step 5.
+  `_git_commit_hash` reused directly from `core.ml.registry` (the model registry's own
+  helper), not a second git-inspection implementation.
+- **Immutability is structural:** `log_experiment` always inserts; there is no
+  `update_experiment` anywhere in the module, verified directly by a test that
+  introspects the module's public names rather than just trusting the docstring.
+- **Real production bug found and fixed:** `get_experiment_history`'s `ORDER BY
+  created_at DESC` alone is ambiguous -- SQLite's `CURRENT_TIMESTAMP` only has
+  second-level resolution, so two experiments logged within the same second (routine
+  for an automated loop; happened immediately in this module's own test suite) sort
+  arbitrarily. Fixed by adding `id DESC` as a tiebreaker (monotonic with insertion
+  order).
+- **Tests:** 11 new, all passing.
+- **Full suite: 567 passed** (556 + 11), 0 regressions.
+- **Migration evidence:** backup
+  `data/backups/finsight_phase2_experiment_tracking_columns_migration_20260713_121059.db`,
+  verified; 52 pre-existing real `ml_training_runs` rows (from this session's own
+  earlier Optuna/nested-CV evidence runs) preserved exactly across the migration.
+- **Real evidence:** logged a real experiment (id 53) with full metadata (calibration
+  results, feature importance, notes, a real captured git commit hash) against the
+  live DB; `get_experiment_history` correctly returns it first (newest) among the 17
+  total real `random_forest` experiments now on record.
 
 ## Notes on sequencing vs. the directive's own text
 

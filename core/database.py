@@ -255,6 +255,16 @@ class MLTrainingRun(Base):
     metrics_json: Mapped[str] = mapped_column(String, nullable=False)
     fold_metrics_json: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Phase 2 Step 11 (additive): the remaining fields the directive's Experiment
+    # Tracking requirement asks for that this Phase 3 table didn't originally have.
+    # Rows are only ever inserted (never updated) by every writer of this table --
+    # that's what makes an experiment record immutable, not a DB-level constraint.
+    git_commit_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    training_duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    prediction_latency_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    calibration_results_json: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    feature_importance_json: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
 
 
 class MLModelRegistry(Base):
@@ -508,6 +518,12 @@ _ADDITIVE_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
     ("prices", "internal_id", "VARCHAR(32)"),
     ("prices", "dividend", "FLOAT"),
     ("prices", "split_ratio", "FLOAT"),
+    ("ml_training_runs", "git_commit_hash", "VARCHAR(64)"),
+    ("ml_training_runs", "training_duration_seconds", "FLOAT"),
+    ("ml_training_runs", "prediction_latency_ms", "FLOAT"),
+    ("ml_training_runs", "calibration_results_json", "TEXT"),
+    ("ml_training_runs", "feature_importance_json", "TEXT"),
+    ("ml_training_runs", "notes", "VARCHAR(1024)"),
 ]
 
 
