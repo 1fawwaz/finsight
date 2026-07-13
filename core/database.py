@@ -283,6 +283,128 @@ class MLImprovementIteration(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+# --- Phase 1 Enterprise Data Platform: symbol registry, checkpoint, operational logs ---
+#
+# Additive only, same as the Phase 3 block above. See docs/SCHEMA.md "Phase 1 Target
+# Schema" for the full design rationale (checkpoint_state single-row decision, closed
+# enums for check_name/failure_type, internal_id/year Parquet partitioning, etc.) --
+# not duplicated here, since that document is the schema source of truth per the
+# operating spec's own precedence rules (docs/FINSIGHT_PHASE1_PHASE2_AGENT_SPEC.md §0).
+
+
+class SymbolRegistry(Base):
+    """Permanent, ticker-change-safe identity for a security. Supersedes `Ticker` as the
+    join key for all new ingestion/validation/feature code; `Ticker` remains in place
+    for the existing app pages until they're migrated onto `internal_id` (a separate,
+    later piece of work -- not assumed done by this table's mere existence)."""
+
+    __tablename__ = "symbol_registry"
+
+    internal_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    current_symbol: Mapped[str] = mapped_column(String(16), unique=True, nullable=False, index=True)
+    historical_symbols_json: Mapped[str] = mapped_column(String, nullable=False, default="[]")
+    listing_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    delisting_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    rename_history_json: Mapped[str] = mapped_column(String, nullable=False, default="[]")
+    merger_history_json: Mapped[str] = mapped_column(String, nullable=False, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    def __repr__(self) -> str:
+        return f"SymbolRegistry(internal_id={self.internal_id!r}, current_symbol={self.current_symbol!r})"
+
+
+class CheckpointState(Base):
+    """Single-row (id=1, upserted) resumption state for the Phase 1 autonomous loop.
+
+    Deliberately single-row, not one-row-per-run: the operating spec describes one
+    continuously-resumed process ("current stage, current dataset version, last
+    processed date/symbol"), not concurrent independent runs needing their own history.
+    Per-run audit trail belongs in the append-only logs below, not here -- see
+    docs/SCHEMA.md "checkpoint_state" for the full rationale.
+    """
+
+    __tablename__ = "checkpoint_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    current_stage: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    current_dataset_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    current_feature_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    last_processed_internal_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    last_processed_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    completed_internal_ids_json: Mapped[str] = mapped_column(String, nullable=False, default="[]")
+    failed_internal_ids_json: Mapped[str] = mapped_column(String, nullable=False, default="[]")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class ValidationLog(Base):
+    """One row per validation check run against one symbol -- append-only. `check_name`
+    is a closed enum (see docs/SCHEMA.md), not an open-ended string, so this table's
+    values are always a fully enumerated, documented set."""
+
+    __tablename__ = "validation_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    internal_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    run_timestamp: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+    check_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    passed: Mapped[bool] = mapped_column(nullable=False)
+    detail_json: Mapped[str] = mapped_column(String, nullable=False, default="{}")
+
+
+class ProviderHealth(Base):
+    """One row per external-provider call -- append-only. `failure_type` is a closed
+    enum (see docs/SCHEMA.md), null when `success` is True."""
+
+    __tablename__ = "provider_health"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    internal_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    call_timestamp: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+    success: Mapped[bool] = mapped_column(nullable=False)
+    latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    failure_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+
+class BackupLog(Base):
+    """One row per backup taken -- append-only. `backup_path` is a bare filename,
+    resolved against `core.backup.BACKUP_DIR` at restore time, the same portable-path
+    convention as `MLModelRegistry.artifact_path` (an absolute path there broke across
+    the host/Docker boundary -- a real bug, fixed; not repeating it here)."""
+
+    __tablename__ = "backup_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    backup_timestamp: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+    trigger: Mapped[str] = mapped_column(String(32), nullable=False)
+    backup_path: Mapped[str] = mapped_column(String(256), nullable=False)
+    verified: Mapped[bool] = mapped_column(nullable=False)
+    restored_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class MetadataRegistry(Base):
+    """Per-`internal_id` rollup metadata (spec §7.11): core sync/versioning facts plus
+    identity/context fields. Denormalized for query convenience -- `SymbolRegistry`
+    remains the source of truth for identity itself."""
+
+    __tablename__ = "metadata_registry"
+
+    internal_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    first_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    latest_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    validation_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    last_sync: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    feature_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    dataset_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    exchange: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    currency: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    timezone: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    data_provider: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 _engine = create_engine(DATABASE_URL, echo=False, future=True)
 SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
 
