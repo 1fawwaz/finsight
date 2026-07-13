@@ -46,7 +46,7 @@ Complete; resume from the first Pending/In-Progress step.
 | 7. Nifty500 support | **BLOCKED** — same root cause as Step 6; skipped by explicit user direction 2026-07-13 | | | |
 | 8. Corporate action handling | **Complete** | `core/database.py` (+`Price.dividend`/`split_ratio`), `core/data_ingestion.py` (extended), `core/corporate_actions.py` (new), `tests/test_corporate_actions.py` (new, 6), `tests/test_ingestion.py` (+2) | 8 new, all passing | see below |
 | 9. Survivorship bias protection | **BLOCKED** — same root cause as Step 6; skipped by explicit user direction 2026-07-13 | | | |
-| 10. Validation framework | Pending | | | |
+| 10. Validation framework | **Complete** | `core/validation.py` (new), `tests/test_validation.py` (new, 11) | 11 new, all passing | see below |
 | 11. Metadata Registry | Pending | | | |
 | 12. Dataset Registry | Pending | | | |
 | 13. Dataset Manifest generation | Pending | | | |
@@ -173,6 +173,35 @@ separate commits, per the spec's "one logical improvement" rule.
   a test helper collided with the real `UNIQUE(ticker_id, date)` constraint across two
   different symbols in one test -- a test bug, not a production one).
 - **Full suite: 395 passed** (387 + 8), 0 regressions.
+
+## Evidence — Step 10
+
+- **Reuse:** `core.ml.data_layer.validate_symbol_history` (schema/duplicate/range/outlier
+  detection, Phase 3) and `core.corporate_actions.validate_corporate_action_consistency`
+  (Step 8) are called directly, not reimplemented -- `core/validation.py` maps their
+  results onto the closed `check_name` enum and adds the two genuinely new checks
+  (calendar reconciliation, symbol identity), reusing `core.market_status.is_trading_day`
+  for the calendar source rather than building a second one.
+- **Tests:** 11 new, all passing, one per check plus an "every check_name gets logged"
+  test and a no-data-doesn't-crash test.
+- **Full suite: 406 passed** (395 + 11), 0 regressions.
+- **Real finding from running against live data (RELIANCE.NS, internal_id `FIN-0001`),
+  not fabricated, not silently hidden:**
+  - `missing_date_calendar` failed: 62 gaps 2021–2025 (e.g. `2021-07-21`, `2021-08-19`).
+    Expected and already documented: `_NSE_HOLIDAYS` only has published data for 2026
+    (see `docs/DATA_SOURCE.md`'s "Partially Active" note on the calendar), so real NSE
+    holidays in 2021–2025 register as weekday-only "missing" data. Not a data quality
+    bug -- a known calendar-coverage gap now made visible and measurable for the first
+    time, which is the validation framework doing its job.
+  - `calendar_consistency` failed: real ingested rows exist on `2026-05-01`
+    (Maharashtra Day), `2026-05-28` (Bakri Id), `2026-06-26` (Muharram) -- all three
+    *are* in `_NSE_HOLIDAYS[2026]`. This means either (a) yfinance returned bars on
+    dates NSE's own equity segment was closed, (b) one or more of these are actually
+    partial/special trading sessions (the spec explicitly calls out "Muhurat trading" as
+    a case the calendar doesn't yet distinguish from a full closure), or (c) a holiday
+    date in the hand-maintained table is inaccurate. **Not resolved here** -- flagged as
+    a genuine open finding for follow-up investigation, not guessed at or silently
+    dropped from the report.
 
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership
