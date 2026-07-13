@@ -37,9 +37,9 @@ Complete; resume from the first Pending/In-Progress step.
 
 | Step | Status | Files | Tests | Commit |
 |---|---|---|---|---|
-| 1. Symbol Registry | **Complete** | `core/symbol_registry.py`, `core/database.py` (+`SymbolRegistry` model), `tests/test_symbol_registry.py` | 11 new, all passing | see below |
-| 2. DB schema & migrations | **Complete** (folded into Step 1 commit — see rationale below) | `core/database.py` (+6 models: `SymbolRegistry`, `CheckpointState`, `ValidationLog`, `ProviderHealth`, `BackupLog`, `MetadataRegistry`), `core/backup.py`, `tests/test_backup.py` | 7 new (backup), migration verified live | see below |
-| 3. Checkpoint system | Pending | | | |
+| 1. Symbol Registry | **Complete** | `core/symbol_registry.py`, `core/database.py` (+`SymbolRegistry` model), `tests/test_symbol_registry.py` | 11 new, all passing | `5b4c63f` |
+| 2. DB schema & migrations | **Complete** (folded into Step 1 commit — see rationale below) | `core/database.py` (+6 models: `SymbolRegistry`, `CheckpointState`, `ValidationLog`, `ProviderHealth`, `BackupLog`, `MetadataRegistry`), `core/backup.py`, `tests/test_backup.py` | 7 new (backup), migration verified live | `5b4c63f` |
+| 3. Checkpoint system | **Complete** | `core/checkpoint.py`, `tests/test_checkpoint.py` | 9 new, all passing | `pending` (next commit) |
 | 4. Historical backfill | Pending | | | |
 | 5. Incremental daily ingestion | Pending | | | |
 | 6. Nifty100 support | Pending — **blocked on constituent data source, see note below** | | | |
@@ -88,6 +88,15 @@ separate commits, per the spec's "one logical improvement" rule.
   moves the *current* symbol into history — it has no "annotate a known predecessor
   without changing today's current_symbol" mode. Needs a small, deliberate follow-up
   function, not a rushed bolt-on now. Filed here, not silently skipped.
+
+## Evidence — Step 3
+
+- **Tests:** `tests/test_checkpoint.py`, 9 new, all passing, including a resumption
+  simulation (`test_resume_after_interruption_skips_completed_work`) proving `remaining()`
+  correctly excludes completed units after a simulated interruption.
+- **Full suite:** 373 passed (364 + 9), 0 regressions.
+- **Verified against the real DB:** `get_checkpoint()` created the single `id=1` row in
+  the live `checkpoint_state` table (not just in-memory test DBs).
 
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership
