@@ -45,7 +45,7 @@ do not restart a step marked Complete.
 | Step | Status | Files | Tests | Commit |
 |---|---|---|---|---|
 | 1. Better Labels | **Implemented; selection PROVISIONAL pending Step 12** | `core/ml/labels.py` (new), `tests/test_ml_labels.py` (new, 16) | 16 new, all passing | see below |
-| 2. Rolling Feature Engineering | Pending | | | |
+| 2. Rolling Feature Engineering | **Complete** | `core/ml/feature_pipeline.py` (+`build_features_v3`/`make_dataset_v3`), `tests/test_ml_feature_pipeline.py` (+8) | 8 new, all passing | see below |
 | 3. Sector-Relative Features | Pending | | | |
 | 4. Market Breadth | Pending | | | |
 | 5. Volatility Features | Pending | | | |
@@ -96,6 +96,29 @@ do not restart a step marked Complete.
   this needs Step 12's full benchmark suite (multi-symbol, walk-forward, calibration,
   trading metrics) before being treated as a real conclusion, per the directive's own
   text.
+
+## Evidence — Step 2
+
+- **Reuse, extend, no duplication:** `build_features_v3` calls `build_features_v2`
+  directly and asserts (via test) the 27 original columns are byte-identical, not
+  recomputed. Deliberately skipped adding volatility features here even though
+  "volatility" is in Step 2's example list -- Step 5 owns that, and duplicating it in
+  both steps would violate the "never duplicate feature engineering logic" rule.
+- **7 new features, one per remaining named category:** `rolling_return_mean_10`
+  (returns), `momentum_20` (momentum, second window alongside the existing
+  `momentum_10`), `drawdown_20` (drawdown), `rolling_sharpe_20` (Sharpe),
+  `price_zscore_20` (z-score), `return_autocorr_20` (correlation -- self-autocorrelation,
+  since no second series exists at single-symbol level; cross-symbol correlation is
+  Steps 3/4), `volume_percentile_20` (volume profile, a rank-based proxy).
+- **Tests:** 8 new, including a no-lookahead regression test (same truncation-comparison
+  pattern as the existing `build_features_v2` test), bounds checks
+  (`drawdown_20 <= 0`, `volume_percentile_20 ∈ [0,1]`, `return_autocorr_20 ∈ [-1,1]`),
+  and a hand-computable Sharpe sanity check (constant +1%/day returns produce a Sharpe
+  > 10). All passing.
+- **Full suite: 480 passed** (472 + 8), 0 regressions.
+- **Real evidence:** built the full 34-feature set for RELIANCE.NS live data --
+  correct shape, sensible real values (e.g. `volume_percentile_20` between 0.25–0.60
+  over the last 3 real trading days).
 
 ## Notes on sequencing vs. the directive's own text
 

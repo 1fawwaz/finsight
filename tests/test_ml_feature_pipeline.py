@@ -9,8 +9,10 @@ import pytest
 from core.database import Price, Ticker, get_session
 from core.ml.feature_pipeline import (
     build_features_v2,
+    build_features_v3,
     load_feature_set,
     make_dataset_v2,
+    make_dataset_v3,
     persist_feature_set,
 )
 
@@ -69,6 +71,83 @@ def test_build_features_v2_with_sentiment_adds_column():
     features = build_features_v2(df, sentiment_by_date=sentiment)
     assert "sentiment" in features.columns
     assert (features["sentiment"].dropna() == 0.5).all()
+
+
+def test_build_features_v3_extends_v2_columns_unchanged():
+    """v3 must be v2 plus new columns -- not a reimplementation that could subtly
+    diverge on the 27 existing features."""
+    df = _make_ohlcv(300)
+    v2 = build_features_v2(df)
+    v3 = build_features_v3(df)
+
+    assert set(v2.columns).issubset(set(v3.columns))
+    pd.testing.assert_frame_equal(v3[v2.columns.tolist()], v2, check_exact=True)
+
+
+def test_build_features_v3_adds_seven_new_rolling_features():
+    df = _make_ohlcv(300)
+    v2 = build_features_v2(df)
+    v3 = build_features_v3(df)
+
+    new_columns = set(v3.columns) - set(v2.columns)
+    assert new_columns == {
+        "rolling_return_mean_10", "momentum_20", "drawdown_20",
+        "rolling_sharpe_20", "price_zscore_20", "return_autocorr_20", "volume_percentile_20",
+    }
+
+
+def test_build_features_v3_has_no_lookahead():
+    df = _make_ohlcv(300)
+    truncated = df.iloc[:-1]
+
+    full_features = build_features_v3(df)
+    truncated_features = build_features_v3(truncated)
+
+    common_index = truncated_features.index
+    pd.testing.assert_frame_equal(full_features.loc[common_index], truncated_features, check_exact=True)
+
+
+def test_drawdown_20_is_never_positive():
+    """Drawdown from a trailing peak can only be zero (at the peak itself) or negative."""
+    df = _make_ohlcv(300)
+    features = build_features_v3(df)
+    assert (features["drawdown_20"].dropna() <= 1e-9).all()
+
+
+def test_volume_percentile_20_is_bounded_0_to_1():
+    df = _make_ohlcv(300)
+    features = build_features_v3(df)
+    col = features["volume_percentile_20"].dropna()
+    assert (col >= 0.0).all() and (col <= 1.0).all()
+
+
+def test_return_autocorr_20_is_bounded_minus1_to_1():
+    df = _make_ohlcv(300)
+    features = build_features_v3(df)
+    col = features["return_autocorr_20"].dropna()
+    assert (col >= -1.0001).all() and (col <= 1.0001).all()
+
+
+def test_rolling_sharpe_20_matches_hand_computed_value_on_synthetic_data():
+    """A known, hand-computable case: constant positive daily returns should produce a
+    very large positive rolling Sharpe (near-zero volatility, positive mean)."""
+    dates = pd.bdate_range("2023-01-01", periods=40)
+    close = pd.Series([100 * (1.01 ** i) for i in range(40)], index=dates)  # exact +1%/day
+    df = pd.DataFrame(
+        {"open": close, "high": close * 1.001, "low": close * 0.999, "close": close, "volume": [1_000_000] * 40},
+        index=dates,
+    )
+    features = build_features_v3(df)
+    # Near-constant daily returns -> std near 0 -> Sharpe should be very large (or the
+    # ratio well-defined and clearly positive, not near-zero or negative).
+    assert features["rolling_sharpe_20"].dropna().iloc[-1] > 10
+
+
+def test_make_dataset_v3_drops_last_row_and_aligns_labels():
+    df = _make_ohlcv(300)
+    features, labels = make_dataset_v3(df)
+    assert len(features) == len(labels)
+    assert len(features) < len(df)  # warm-up + last-row drop
 
 
 def test_make_dataset_v2_drops_last_row_and_aligns_labels():

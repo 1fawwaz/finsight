@@ -101,6 +101,79 @@ def build_features_v2(price_df: pd.DataFrame, sentiment_by_date: pd.Series | Non
     return features
 
 
+def build_features_v3(price_df: pd.DataFrame, sentiment_by_date: pd.Series | None = None) -> pd.DataFrame:
+    """Phase 2 Step 2 (Rolling Feature Engineering): extends `build_features_v2`'s 27
+    features (called directly, not recomputed) with 7 additional rolling-window
+    features, one per category named in the Phase 2 directive: rolling returns,
+    momentum, drawdown, Sharpe, z-score, (auto)correlation, volume profile.
+
+    Deliberately does NOT add more volatility features here even though "volatility" is
+    one of Step 2's example feature types -- Step 5 is explicitly dedicated to
+    volatility (ATR, Parkinson, Yang-Zhang, regime classification) and adding
+    volatility features in both steps would duplicate that work rather than extend it.
+    `volatility_20` (already in `build_features_v2`) remains the volatility feature
+    until Step 5 builds on it.
+
+    "Correlation" is implemented as each symbol's own lag-1 return autocorrelation
+    (there is no second series to correlate against at this single-symbol level --
+    cross-symbol/benchmark correlation is Step 3's Sector-Relative Features and Step 4's
+    Market Breadth, which do have a second series to compare to).
+    """
+    features = build_features_v2(price_df, sentiment_by_date)
+    close = price_df["close"]
+    volume = price_df["volume"]
+    daily_returns = close.pct_change()
+
+    # Rolling returns: smoothed average daily return over a trailing window, distinct
+    # from build_features_v2's lag_return_N (a single N-day-ago point return).
+    features["rolling_return_mean_10"] = daily_returns.rolling(window=10, min_periods=10).mean()
+
+    # Momentum: a second window alongside build_features_v2's existing momentum_10.
+    features["momentum_20"] = close - close.shift(20)
+
+    # Drawdown: percentage decline from the trailing 20-day running peak.
+    rolling_peak_20 = close.rolling(window=20, min_periods=20).max()
+    features["drawdown_20"] = close / rolling_peak_20 - 1
+
+    # Sharpe: rolling mean/std of daily returns, annualized -- same formula as
+    # core.portfolio.sharpe_ratio, applied as a rolling window instead of one scalar
+    # over a whole series (that function computes a single number for a fixed period,
+    # not a per-row rolling feature, so it's reused conceptually, not literally called).
+    rolling_mean_20 = daily_returns.rolling(window=20, min_periods=20).mean()
+    rolling_std_20 = daily_returns.rolling(window=20, min_periods=20).std()
+    features["rolling_sharpe_20"] = (rolling_mean_20 / rolling_std_20) * (252 ** 0.5)
+
+    # Z-score: how many standard deviations today's close is from its own 20-day mean.
+    price_mean_20 = close.rolling(window=20, min_periods=20).mean()
+    price_std_20 = close.rolling(window=20, min_periods=20).std()
+    features["price_zscore_20"] = (close - price_mean_20) / price_std_20
+
+    # Correlation: lag-1 autocorrelation of daily returns over a trailing window.
+    features["return_autocorr_20"] = daily_returns.rolling(window=21, min_periods=21).apply(
+        lambda w: pd.Series(w).autocorr(lag=1), raw=False
+    )
+
+    # Volume profile: today's volume's percentile rank within the trailing 20-day window
+    # (0 = lowest volume day in the window, 1 = highest) -- a real, simple volume-profile
+    # proxy, not the full price-level volume-by-price distribution.
+    features["volume_percentile_20"] = volume.rolling(window=20, min_periods=20).apply(
+        lambda w: pd.Series(w).rank(pct=True).iloc[-1], raw=False
+    )
+
+    return features
+
+
+def make_dataset_v3(
+    price_df: pd.DataFrame, sentiment_by_date: pd.Series | None = None
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Same no-lookahead contract as make_dataset_v2, using the Step 2-extended feature
+    set."""
+    features = build_features_v3(price_df, sentiment_by_date)
+    labels = build_labels(price_df["close"])
+    combined = features.join(labels.rename("label")).dropna()
+    return combined.drop(columns=["label"]), combined["label"].astype(int)
+
+
 def make_dataset_v2(
     price_df: pd.DataFrame, sentiment_by_date: pd.Series | None = None
 ) -> tuple[pd.DataFrame, pd.Series]:
