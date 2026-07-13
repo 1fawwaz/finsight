@@ -113,6 +113,23 @@ def make_dataset_v2(
     return combined.drop(columns=["label"]), combined["label"].astype(int)
 
 
+def make_dataset_v2_from_parquet(
+    internal_id: str, sentiment_by_date: pd.Series | None = None
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Phase 1 Step 17: identical to `make_dataset_v2`, sourced from the Parquet
+    market_data store (core.parquet_store, Step 16) instead of SQLite -- reuses
+    `build_features_v2`/`build_labels` unchanged, so results are directly comparable to
+    the SQLite-sourced path; only the read path differs (faster, columnar, per spec
+    §7.14's stated benefit). Requires `core.parquet_store.sync_from_sqlite(internal_id)`
+    to have been run at least once -- SQLite remains the source of truth this reads a
+    synced copy of, not an independent one.
+    """
+    from core.parquet_store import read_market_data  # local import: avoids a module-level cycle (parquet_store doesn't need feature_pipeline)
+
+    price_df = read_market_data(internal_id)
+    return make_dataset_v2(price_df, sentiment_by_date)
+
+
 def _pipeline_code_hash() -> str:
     """Hash of this module's feature-generation source, so a stored feature set can be
     tied to the exact code that produced it -- if build_features_v2 changes, its hash

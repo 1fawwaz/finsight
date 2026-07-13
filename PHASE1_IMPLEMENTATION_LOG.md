@@ -53,7 +53,7 @@ Complete; resume from the first Pending/In-Progress step.
 | 14. Provider Health monitoring | **Complete** | `core/provider_health.py` (new), `core/data_ingestion.py` (extended `fetch_price_history`), `tests/test_provider_health.py` (new, 9), `tests/test_ingestion.py` (+2) | 11 new, all passing | see below |
 | 15. Backup and rollback support | **Complete** (file-copy primitive was pulled forward into Step 2; this step completes it) | `core/backup.py` (extended: `trigger` param, `backup_log` persistence, `restore_last_verified_backup`), `tests/test_backup.py` (+6) | 6 new, all passing | see below |
 | 16. Parquet storage | **Complete** | `core/parquet_store.py` (new), `requirements.txt` (+`pyarrow==25.0.0`, pinned explicitly), `tests/test_parquet_store.py` (new, 10) | 10 new, all passing | see below |
-| 17. Feature Store integration + Acceptance Gate | Pending | | | |
+| 17. Feature Store integration + Acceptance Gate | **Integration complete; Acceptance Gate verified below** | `core/ml/feature_pipeline.py` (+`make_dataset_v2_from_parquet`), `tests/test_feature_pipeline_parquet_integration.py` (new, 2) | 2 new, all passing | see below |
 
 **Rationale for folding Step 2 into Step 1:** `SymbolRegistry` itself *is* a schema
 addition, and the spec's own Prime Directive requires "never write to the database
@@ -324,6 +324,24 @@ separate commits, per the spec's "one logical improvement" rule.
   (2 for the two known-thin symbols), 1.6 MB on disk. Read back `FIN-0001`
   (RELIANCE.NS): 1,239 rows, correct columns, and the most recent row matches the real
   `2026-07-13` candle ingested live during Step 14's evidence run.
+
+## Evidence — Step 17 (Feature Store integration)
+
+- **Design:** `core.ml.feature_pipeline.make_dataset_v2_from_parquet(internal_id)` reuses
+  `build_features_v2`/`build_labels` unchanged -- only the read path differs (Parquet via
+  Step 16's `read_market_data`, instead of SQLite). Proven identical output via a direct
+  `pd.testing.assert_frame_equal`/`assert_series_equal` comparison against the existing
+  SQLite path for the same data, not just "both ran without error."
+- **Real bug found in the test, not production:** the test's manually-built comparison
+  DataFrame had its index name cleared to `None`, while both `read_market_data` and the
+  real production `core.queries.get_price_history` name their index `"date"` (confirmed
+  by reading `get_price_history`'s actual `set_index("date")` call) -- fixed the test to
+  match the real shared convention rather than papering over the mismatch.
+- **Tests:** 2 new, all passing.
+- **Full suite: 456 passed** (454 + 2), 0 regressions.
+- **Real evidence:** generated features for RELIANCE.NS (`FIN-0001`) via the Parquet path
+  against live-synced data -- 1,174 rows × 27 features, identical feature set to the
+  existing SQLite-sourced pipeline.
 
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership
