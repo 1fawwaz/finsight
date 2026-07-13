@@ -295,8 +295,21 @@ def run_full_benchmark(
     split -- simpler than reusing `core.ml.cv.chronological_train_val_test_split`,
     which is shaped for multi-symbol panel data with a (symbol, date) MultiIndex; this
     operates on one symbol's already-loaded feature set).
+
+    `features`/`labels` are aligned via an inner join before splitting -- required
+    because not every label candidate (`core.ml.labels`) has the same row count as
+    `features`: a three-class label collapsed with `to_binary()` drops its neutral-class
+    rows, so `labels` can be shorter than `features` with a non-contiguous index. A bare
+    positional slice on two differently-sized inputs raised a real `ValueError` the
+    first time this function was used with such a label, caught while generating this
+    module's own benchmark evidence, not by a test that happened to only use
+    already-aligned inputs.
     """
     params = hyperparameters or {"n_estimators": 200, "max_depth": 5, "min_samples_leaf": 10, "random_state": RANDOM_STATE}
+
+    combined = features.join(labels.rename("__label__"), how="inner").dropna()
+    features = combined.drop(columns=["__label__"])
+    labels = combined["__label__"].astype(int)
 
     n = len(features)
     train_end = int(n * 0.6)

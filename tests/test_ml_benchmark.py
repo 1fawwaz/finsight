@@ -141,6 +141,22 @@ def test_run_full_benchmark_produces_all_five_categories():
     assert len(report.fold_metrics) >= 3
 
 
+def test_run_full_benchmark_handles_a_label_shorter_than_features():
+    """A label that drops rows relative to features (e.g. core.ml.labels.to_binary
+    dropping a neutral class) must be aligned via an inner join, not assumed to already
+    match features' length/index -- a real ValueError this exact scenario raised before
+    the fix, not a hypothetical."""
+    features, _, close = _make_dataset(900)
+    rng = np.random.default_rng(11)
+    sparse_index = features.index[::2]  # every other date -- a label roughly half the length of features
+    sparse_labels = pd.Series(rng.integers(0, 2, len(sparse_index)), index=sparse_index)
+
+    report = run_full_benchmark(features, sparse_labels, close, hyperparameters={"n_estimators": 30, "max_depth": 3, "random_state": 42})
+
+    assert len(report.fold_metrics) >= 1
+    assert 0.0 <= report.classification["accuracy"] <= 1.0
+
+
 def test_promotion_bootstrap_case_no_champion_exists():
     features, labels, close = _make_dataset(900)
     challenger = run_full_benchmark(features, labels, close, hyperparameters={"n_estimators": 50, "max_depth": 3, "random_state": 42})
