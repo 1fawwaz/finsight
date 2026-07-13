@@ -6,8 +6,8 @@ import pandas as pd
 import pytest
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-from core.data_ingestion import IngestionError, _validate_history, get_or_create_ticker, upsert_prices
-from core.database import Price, Ticker
+from core.data_ingestion import IngestionError, _validate_history, fetch_price_history, get_or_create_ticker, upsert_prices
+from core.database import Price, ProviderHealth, Ticker
 
 
 def _make_history(dates: list[str], dividends: list[float] | None = None, splits: list[float] | None = None) -> pd.DataFrame:
@@ -185,6 +185,40 @@ def test_upsert_prices_dedups_across_ticker_rows_sharing_the_same_internal_id(db
     assert first == 2
     assert second == 0  # already covered under the same internal_id, via a different ticker_id
     assert db_session.query(Price).count() == 2
+
+
+def test_fetch_price_history_records_provider_health_on_success(temp_db, monkeypatch):
+    monkeypatch.setattr(
+        "core.data_ingestion.yf.Ticker",
+        lambda symbol: type("T", (), {"history": lambda self, period="5y", auto_adjust=False: _make_history(["2024-01-01"])})(),
+    )
+
+    fetch_price_history("RELIANCE.NS")
+
+    from core.database import get_session
+
+    with get_session() as session:
+        row = session.query(ProviderHealth).one()
+        assert row.provider == "yfinance"
+        assert row.success is True
+        assert row.latency_ms is not None
+
+
+def test_fetch_price_history_records_provider_health_on_failure_and_still_raises(temp_db, monkeypatch):
+    monkeypatch.setattr(
+        "core.data_ingestion.yf.Ticker",
+        lambda symbol: type("T", (), {"history": lambda self, period="5y", auto_adjust=False: pd.DataFrame()})(),
+    )
+
+    with pytest.raises(IngestionError):
+        fetch_price_history("RELIANCE.NS")
+
+    from core.database import get_session
+
+    with get_session() as session:
+        row = session.query(ProviderHealth).one()
+        assert row.success is False
+        assert row.failure_type == "malformed_response"
 
 
 def test_upsert_prices_captures_dividends_and_splits_when_present(db_session):

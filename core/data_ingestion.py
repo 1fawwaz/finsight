@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import date as date_type
 from typing import Optional
 
@@ -12,6 +13,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from core.config import DEFAULT_TICKERS, HISTORY_PERIOD, UNSUPPORTED_MARKET_MESSAGE, get_logger, is_supported_symbol
 from core.database import Price, Ticker, get_session, init_db
+from core.provider_health import record_call
 from core.symbol_registry import get_or_create as get_or_create_symbol_registry_entry
 from core.universe import resolve_symbol
 
@@ -70,10 +72,54 @@ def _validate_history(symbol: str, history: pd.DataFrame) -> None:
         raise IngestionError(f"{symbol!r} history missing columns: {missing}")
 
 
+def _classify_failure(exc: Exception) -> str:
+    """Map an exception to Phase 1's closed provider_health.failure_type enum
+    (docs/SCHEMA.md) -- never an ad hoc string at the call site."""
+    if isinstance(exc, IngestionError):
+        return "malformed_response"
+    text = str(exc).lower()
+    if "timeout" in text or "timed out" in type(exc).__name__.lower():
+        return "timeout"
+    if "429" in text or "rate limit" in text or "too many requests" in text:
+        return "rate_limit"
+    if "401" in text or "403" in text or "auth" in text:
+        return "auth"
+    if "not found" in text or "404" in text:
+        return "not_found"
+    return "connection_error"
+
+
 def fetch_price_history(symbol: str, period: str = HISTORY_PERIOD) -> pd.DataFrame:
-    """Download OHLCV history for a symbol from yfinance and validate it."""
-    history = yf.Ticker(symbol).history(period=period, auto_adjust=False)
-    _validate_history(symbol, history)
+    """Download OHLCV history for a symbol from yfinance and validate it.
+
+    Records provider health (Phase 1 Step 14, spec §7.5) around this module's one real
+    external call site -- success + latency, or failure + latency + a classified
+    failure_type -- in its own short-lived session, independent of any ingestion
+    transaction already in progress. A provider-health write failure must never mask
+    the real fetch outcome, so recording happens after the fetch/validate result (or
+    exception) is already determined, and any provider-health error is logged, not
+    raised, to keep this function's actual contract (return a DataFrame or raise on a
+    real fetch problem) unchanged.
+    """
+    start = time.monotonic()
+    try:
+        history = yf.Ticker(symbol).history(period=period, auto_adjust=False)
+        _validate_history(symbol, history)
+    except Exception as exc:
+        latency_ms = int((time.monotonic() - start) * 1000)
+        try:
+            with get_session() as session:
+                record_call(session, "yfinance", success=False, latency_ms=latency_ms, failure_type=_classify_failure(exc))
+        except Exception as health_exc:  # provider-health logging must never mask the real fetch failure
+            logger.warning("Provider health logging failed (fetch failure still raised): %s", health_exc)
+        raise
+
+    latency_ms = int((time.monotonic() - start) * 1000)
+    try:
+        with get_session() as session:
+            record_call(session, "yfinance", success=True, latency_ms=latency_ms)
+    except Exception as health_exc:
+        logger.warning("Provider health logging failed (fetch succeeded, returning result): %s", health_exc)
     return history
 
 

@@ -50,7 +50,7 @@ Complete; resume from the first Pending/In-Progress step.
 | 11. Metadata Registry | **Complete** | `core/metadata_registry.py` (new), `tests/test_metadata_registry.py` (new, 10) | 10 new, all passing | see below |
 | 12. Dataset Registry | **Complete** | `core/ml/data_layer.py` (extended `SymbolQualityReport`/`DatasetQualityReport`), `tests/test_ml_data_layer.py` (+2) | 2 new, all passing | see below |
 | 13. Dataset Manifest generation | **Complete** | `core/dataset_manifest.py` (new), `tests/test_dataset_manifest.py` (new, 9) | 9 new, all passing | see below |
-| 14. Provider Health monitoring | Pending | | | |
+| 14. Provider Health monitoring | **Complete** | `core/provider_health.py` (new), `core/data_ingestion.py` (extended `fetch_price_history`), `tests/test_provider_health.py` (new, 9), `tests/test_ingestion.py` (+2) | 11 new, all passing | see below |
 | 15. Backup and rollback support | Pending (backup primitive pulled forward into Step 2, see below) | | | |
 | 16. Parquet storage | Pending — **new dependency, needs justification per Architecture Change Rule** | | | |
 | 17. Feature Store integration + Acceptance Gate | Pending | | | |
@@ -260,6 +260,25 @@ separate commits, per the spec's "one logical improvement" rule.
     manifest: `internal_ids` fully populated (`FIN-0001`..`FIN-0005`), quality score
     composite **100.0** (completeness/integrity/coverage/freshness/corporate_action_validation
     all 100.0) -- real, verified, checksum `sha256:0d5af5551f...`.
+
+## Evidence — Step 14
+
+- **No schema migration needed:** `provider_health` was already created in Step 2's
+  batch migration -- this step is purely the recording/query code layer on top of it.
+- **Design:** `fetch_price_history` (the app's one real external-data call site) is
+  extended, not duplicated, to record success/latency or failure/latency/classified
+  `failure_type` around the existing `yf.Ticker(...).history()` call. A provider-health
+  logging failure is caught and logged, never allowed to mask the real fetch outcome --
+  the function's actual contract (return a DataFrame, or raise on a genuine fetch
+  problem) is unchanged.
+- **Tests:** 11 new (9 `test_provider_health.py`, 2 `test_ingestion.py` integration
+  tests covering both the success and failure path), all passing.
+- **Full suite: 438 passed** (427 + 11), 0 regressions.
+- **Real evidence:** ran `ingest_ticker("RELIANCE.NS")` against the live DB (a genuine
+  yfinance network call) -- inserted 1 new incremental row, and
+  `summarize_provider_health` correctly reported `window_calls=1`,
+  `success_rate=100.0`, `latency_p50_ms=2280` (a real measured latency), and a current
+  `last_successful_sync` timestamp.
 
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership
