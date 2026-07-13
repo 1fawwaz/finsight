@@ -423,6 +423,41 @@ class MetadataRegistry(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+# --- Phase 2 ML Foundation Improvements: market breadth --------------------------------
+#
+# Additive, same as the Phase 1/3 blocks above. Phase 1 is frozen per the Phase 2
+# directive; this is a new table, not a modification of anything Phase 1 built.
+# Justification for a new table (per the directive's Architecture Change Rule): market
+# breadth is one row per *trading date* across the whole tracked universe, not one row
+# per symbol -- it doesn't fit MLFeatureValue's (feature_set, ticker, date) shape, which
+# is inherently per-symbol. No existing table represents "a fact about the market as a
+# whole on a given day."
+
+
+class MarketBreadthDaily(Base):
+    """One row per trading date: cross-sectional market-wide statistics computed across
+    whichever symbols were included in the run that produced it (see `symbols_json`).
+    Reusable across any model's feature set (spec: "stored independently from model-
+    specific features") -- a stock-specific feature builder joins this by date rather
+    than each recomputing its own copy of the same market-wide facts.
+    """
+
+    __tablename__ = "market_breadth_daily"
+
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    universe_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    advance_decline_ratio: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    new_highs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    new_lows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pct_above_ema20: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pct_above_ema50: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pct_above_ema200: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    market_momentum_20: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    market_participation: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    symbols_json: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 _engine = create_engine(DATABASE_URL, echo=False, future=True)
 SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False, future=True)
 

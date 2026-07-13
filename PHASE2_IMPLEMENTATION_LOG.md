@@ -47,7 +47,7 @@ do not restart a step marked Complete.
 | 1. Better Labels | **Implemented; selection PROVISIONAL pending Step 12** | `core/ml/labels.py` (new), `tests/test_ml_labels.py` (new, 16) | 16 new, all passing | see below |
 | 2. Rolling Feature Engineering | **Complete** | `core/ml/feature_pipeline.py` (+`build_features_v3`/`make_dataset_v3`), `tests/test_ml_feature_pipeline.py` (+8) | 8 new, all passing | see below |
 | 3. Sector-Relative Features | **Complete** | `core/ml/sector_features.py` (new), `tests/test_ml_sector_features.py` (new, 6) | 6 new, all passing | see below |
-| 4. Market Breadth | Pending | | | |
+| 4. Market Breadth | **Complete** | `core/database.py` (+`MarketBreadthDaily`, new table), `core/ml/market_breadth.py` (new), `tests/test_ml_market_breadth.py` (new, 8) | 8 new, all passing | see below |
 | 5. Volatility Features | Pending | | | |
 | 6. Feature Selection | Pending | | | |
 | 7. Probability Calibration | Pending | | | |
@@ -141,6 +141,31 @@ do not restart a step marked Complete.
   and `sector_breadth` between 0.0–0.5. `BHARTIARTL.NS` (the real sole Communication
   Services stock in the tracked universe) correctly returns all-NaN, not a fabricated
   value.
+
+## Evidence — Step 4
+
+- **New table justified per the Architecture Change Rule** (stated, not assumed):
+  `market_breadth_daily` is one row per trading date across the whole universe, which
+  doesn't fit `MLFeatureValue`'s per-(feature_set, ticker, date) shape -- no existing
+  table represents a market-wide daily fact. Additive; Phase 1 tables untouched.
+- **Test bug found and fixed, not production:** a test asserted
+  `value in (float("inf"), float("-inf"))`, which raises `TypeError: boolean value of NA
+  is ambiguous` when the value is `pd.NA` -- exactly the correct, intended result for a
+  zero-decline day (divide-by-zero avoided via `.replace(0, pd.NA)`). Fixed the
+  assertion to use `pd.isna()` first.
+- **Real deprecation warning fixed proactively:** `pct_change()`'s default
+  `fill_method='pad'` is being removed in a future pandas version -- set explicitly to
+  `fill_method=None` so gaps aren't silently forward-filled as if they were real trading.
+- **Tests:** 8 new, all passing.
+- **Full suite: 494 passed** (486 + 8), 0 regressions.
+- **Migration evidence:** backup
+  `data/backups/finsight_phase2_market_breadth_schema_migration_20260713_112751.db`,
+  verified; new table confirmed via `sqlalchemy.inspect` (19→20 tables).
+- **Real evidence:** computed and persisted market breadth across all 17 non-benchmark
+  real tracked symbols -- 1,239 real trading dates written. Correctly shows
+  `universe_size=1` for `2026-07-13` (only `RELIANCE.NS` has that day's candle ingested
+  so far, per Step 14's evidence run) rather than fabricating full coverage for a date
+  most symbols haven't synced yet -- an honest reflection of actual ingestion state.
 
 ## Notes on sequencing vs. the directive's own text
 
