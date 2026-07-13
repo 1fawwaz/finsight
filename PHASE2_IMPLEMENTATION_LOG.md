@@ -50,7 +50,7 @@ do not restart a step marked Complete.
 | 4. Market Breadth | **Complete** | `core/database.py` (+`MarketBreadthDaily`, new table), `core/ml/market_breadth.py` (new), `tests/test_ml_market_breadth.py` (new, 8) | 8 new, all passing | see below |
 | 5. Volatility Features | **Complete** | `core/indicators.py` (extended: +5 functions), `tests/test_indicators.py` (+12) | 12 new, all passing | see below |
 | 6. Feature Selection | **Complete** | `core/database.py` (+`FeatureRegistry`, new table), `core/ml/feature_selection.py` (new), `tests/test_ml_feature_selection.py` (new, 12) | 12 new, all passing | see below |
-| 7. Probability Calibration | Pending | | | |
+| 7. Probability Calibration | **Complete** | `core/ml/calibration.py` (new), `tests/test_ml_calibration.py` (new, 8) | 8 new, all passing | see below |
 | 8. Walk-Forward Validation | Pending | | | |
 | 9. Time-Series Cross-Validation | Pending | | | |
 | 10. Feature Importance Monitoring | Pending | | | |
@@ -231,6 +231,36 @@ do not restart a step marked Complete.
   `dist_from_resistance`, `drawdown_20`, `momentum_20`, `rolling_sharpe_20`) --
   **not deprecated** (that needs a deliberate registry decision with evidence, per the
   directive; flagging is the evidence, not the decision itself).
+
+## Evidence — Step 7
+
+- **Reuse:** `sklearn.calibration.CalibratedClassifierCV` (Platt/isotonic, `cv="prefit"`
+  so a held-out calibration set is used, not the model's own training data),
+  `calibration_curve`, `brier_score_loss` -- none reimplemented. Temperature scaling has
+  no sklearn equivalent, implemented directly (single-scalar log-loss minimization,
+  Guo et al. 2017).
+- **Tests:** 8 new, including a synthetic-data proof that ECE≈0 for genuinely
+  calibrated probabilities and is large (>0.3) for a deliberately overconfident model,
+  `MCE >= ECE` as a structural property (not just observed on one example), and a
+  temperature-scaling sanity check (fits ~1.0 for already-calibrated input, >1.2 for
+  deliberately overconfident input). All passing.
+- **Full suite: 526 passed** (518 + 8), 0 regressions.
+- **Real evidence** (RELIANCE.NS's real 34-feature set, RandomForest, real 60/20/20
+  chronological train/calibration/test split):
+
+  | Method | Brier | ECE | MCE |
+  |---|---|---|---|
+  | raw | 0.2525 | 0.0644 | 0.1246 |
+  | **platt** | **0.2515** | **0.0426** | 0.1275 |
+  | isotonic | 0.2568 | 0.0829 | 0.2541 |
+  | temperature (T=1.142) | 0.2519 | 0.0593 | 0.2834 |
+
+  **Honest reading:** Platt scaling wins on both Brier and ECE here. Isotonic performs
+  *worse* than raw on this run -- a realistic outcome, not a bug: isotonic regression is
+  more flexible than Platt and needs more calibration data to avoid overfitting its own
+  curve, and the calibration split here is ~235 rows, consistent with the known
+  small-sample weakness stated in this module's own docstring. Not a final Step-12
+  selection -- flagged as evidence for that step.
 
 ## Notes on sequencing vs. the directive's own text
 
