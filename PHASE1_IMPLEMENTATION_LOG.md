@@ -343,6 +343,51 @@ separate commits, per the spec's "one logical improvement" rule.
   against live-synced data -- 1,174 rows × 27 features, identical feature set to the
   existing SQLite-sourced pipeline.
 
+## Phase 1 Acceptance Gate Verification (spec §7.17)
+
+Run 2026-07-13 against the real, live database (20 symbols, `dataset_v2` created this
+session). Per spec's own Acceptance Gate rule: **do not claim complete because
+implementation was attempted — every item needs real evidence, and any failing item is
+reported, not hidden.**
+
+| # | Gate item | Status | Evidence |
+|---|---|---|---|
+| 1 | Nifty100 downloads successfully | **BLOCKED** | No authoritative constituent source exists (Steps 6/7/9). Skipped by explicit user direction 2026-07-13. |
+| 2 | Historical depth verified per symbol (actual vs. expected first-date) | **PARTIAL** | `historical_backfill.py` uses yfinance's `"max"` period (earliest available), so depth is *maximal by construction*, not verified symbol-by-symbol against an independent "expected first-date" source (no such source exists without Nifty membership/listing-date data — same root blocker as #1). |
+| 3 | Coverage % ≥ 95% of universe | **PASS (for the 20-symbol universe)** | 20/20 symbols have `row_count > 0` in `MetadataRegistry` = 100% coverage of the currently-tracked universe. Cannot be evaluated against "the Nifty100 universe" since that set isn't resolvable (#1). |
+| 4 | Last update timestamp current for every symbol | **PASS** | Real `ingest_ticker` call (Step 14 evidence) inserted today's (`2026-07-13`) candle for RELIANCE.NS; `MetadataRegistry.last_sync`/manifest freshness scores reflect this. |
+| 5 | Checksum recorded and verified for the dataset version | **PASS** | `dataset_v2`'s manifest: `sha256:0d5af5551f...`, reproducible (tested). |
+| 6 | Incremental sync works | **PASS** | Real evidence: re-running `ingest_ticker` only inserts genuinely new dates (Step 5's dedup logic, Step 14's live call). |
+| 7 | Validation passes, including calendar reconciliation and symbol-identity | **FAIL (real, unresolved)** | Ran `run_full_validation` against all 20 real symbols: `ohlc_integrity`/`duplicate_row`/`symbol_identity`/`volume_anomaly`/`timestamp_ordering` = 20/20 pass. `missing_date_calendar` = **0/20 pass** (expected: `_NSE_HOLIDAYS` only covers 2026, so 2021–2025 holidays register as gaps — a known, documented calendar-coverage limitation, not a data bug). `calendar_consistency` = **2/20 pass** (18 symbols have rows on dates the 2026 holiday table marks closed — a genuine, unresolved finding, not investigated further this session). `price_anomaly` = 19/20. `corporate_action_consistency` = 16/20 (4 symbols have unexplained large moves, e.g. `FIN-0018` has 7, `FIN-0020` has 9 — genuine findings, not investigated further). |
+| 8 | Symbol Registry populated for 100% of ingested symbols, no orphans | **PASS** | 20/20 real tickers backfilled (Step 1); `symbol_identity` check passes 20/20. |
+| 9 | `docs/SCHEMA.md` matches the actual implemented schema | **PASS** | Verified via direct `sqlalchemy.inspect` column dump against all 6 new tables + `prices`'s 3 new columns — exact match. `prices`'s doc entry was stale (predated Step 5/8) and was updated as part of this verification. |
+| 10 | Data Quality Score computed, acceptable threshold | **PASS (for dataset_v2)**; **not computed for the full 20-symbol/dataset_v1 universe** | `dataset_v2` (5 symbols): composite 100.0. `dataset_v1` (15 symbols, pre-Phase-1): manifest generated but shows placeholder `internal_ids: []`/`freshness: 0.0` since it predates Step 12's fields (documented, not patched retroactively). |
+| 11 | Dataset version created, including constituent history used | **PARTIAL** | Dataset version created (`dataset_v2`); constituent history explicitly recorded as `"not_available -- blocked..."` rather than fabricated (#1's blocker). |
+| 12 | Dataset manifest generated and complete | **PASS** | `dataset_v2_manifest.json`, all required fields present, verified checksum. |
+| 13 | Metadata registry updated (exchange/currency/timezone/provider) | **PASS** | All 20 real symbols refreshed; exchange correctly derived (NSE/BSE), currency/timezone/provider set. |
+| 14 | Feature store updated | **PASS** | Parquet-sourced feature generation verified identical to SQLite-sourced, real 27-feature output for RELIANCE.NS. |
+| 15 | Provider health metrics recorded for the run | **PASS** | Real `yfinance` call recorded: 100% success rate, real ~2.3s latency, current `last_successful_sync`. |
+| 16 | Reports generated | **PARTIAL** | Validation/Coverage/Anomaly data all exist as queryable rows (`validation_log`) and JSON (`quality_report_json`, manifests) — but no separately-rendered "Report" documents (e.g. a formatted Validation Report file) were generated this session. The underlying data for one exists; the rendering step doesn't. |
+| 17 | Every schema change / bulk write has a verified backup on record | **PASS (from Step 15 onward)** | Every migration/bulk write in this session had a real, verified file backup taken *before* it (10 total across the session). `backup_log` DB rows exist only from Step 15's wiring onward (1 row) — earlier backups are real and verified on disk but predate the logging table; this is stated, not hidden. |
+| 18 | No duplicate data | **PASS** | Real query: 0 duplicate `(ticker_id, date)` combos, 0 duplicate `(internal_id, date)` combos across all 22,619+ price rows. |
+| 19 | No data loss | **PASS** | Row count checked before/after every migration this session (22,619 preserved through 2 column migrations). |
+| 20 | Repository remains clean | **PASS** | 456/456 tests passing at session end, `git status` clean after every commit, 17 commits this session, none pushed (per standing policy). |
+
+### Overall Gate Status: **NOT PASSED**
+
+Per the spec's own rule, this is stated plainly rather than rounded up: **items 1, 2, 7,
+11, and 16 do not fully pass.** Items 1/2/11 share one root cause (blocked, by explicit
+user direction, on an authoritative Nifty constituent dataset). Item 7 is a genuine,
+newly-surfaced data-quality finding (calendar coverage gap + 18 symbols with rows on
+2026-marked-holiday dates + 4 symbols with unexplained corporate-action-sized moves) that
+this session did not attempt to resolve — investigating and fixing it is real,
+scoped future work, not a rubber stamp. Item 16 is a rendering gap, not a data gap.
+
+**Every other Phase 1 requirement genuinely built and verified this session (Steps 1, 2,
+3, 4, 5, 8, 10, 11, 12, 13, 14, 15, 16, 17) has real, reproducible evidence — an
+`OperationalError`, an `IntegrityError`, or a failing `pytest` assertion surfaced every
+regression along the way, and each was fixed and re-verified, not hidden.**
+
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership
 column — it answers "is this a valid NSE symbol" but not "is this in the Nifty100 today,
