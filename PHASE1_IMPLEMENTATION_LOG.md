@@ -49,7 +49,7 @@ Complete; resume from the first Pending/In-Progress step.
 | 10. Validation framework | **Complete** | `core/validation.py` (new), `tests/test_validation.py` (new, 11) | 11 new, all passing | see below |
 | 11. Metadata Registry | **Complete** | `core/metadata_registry.py` (new), `tests/test_metadata_registry.py` (new, 10) | 10 new, all passing | see below |
 | 12. Dataset Registry | **Complete** | `core/ml/data_layer.py` (extended `SymbolQualityReport`/`DatasetQualityReport`), `tests/test_ml_data_layer.py` (+2) | 2 new, all passing | see below |
-| 13. Dataset Manifest generation | Pending | | | |
+| 13. Dataset Manifest generation | **Complete** | `core/dataset_manifest.py` (new), `tests/test_dataset_manifest.py` (new, 9) | 9 new, all passing | see below |
 | 14. Provider Health monitoring | Pending | | | |
 | 15. Backup and rollback support | Pending (backup primitive pulled forward into Step 2, see below) | | | |
 | 16. Parquet storage | Pending — **new dependency, needs justification per Architecture Change Rule** | | | |
@@ -238,6 +238,28 @@ separate commits, per the spec's "one logical improvement" rule.
 - **Tests:** 2 new, both passing; all 14 pre-existing `test_ml_data_layer.py` tests
   still pass unchanged.
 - **Full suite: 418 passed** (416 + 2), 0 regressions.
+
+## Evidence — Step 13
+
+- **Bug found in a test, not production:** `_seed_symbol` test helper created `Price`
+  rows without stamping `internal_id` (unlike real ingestion via `upsert_prices`), so
+  `refresh_metadata` found 0 matching rows and freshness silently computed as 0. Fixed
+  the test helper to resolve the registry entry first and stamp every seeded row, the
+  same order real ingestion follows.
+- **Tests:** 9 new, all passing.
+- **Full suite: 427 passed** (418 + 9), 0 regressions.
+- **Real evidence against the live DB:**
+  - Generated a manifest for the pre-existing Phase 3 `dataset_v1` --
+    `data/manifests/dataset_v1_manifest.json` -- and it honestly shows
+    `"internal_ids": []` and `freshness: 0.0`, because that dataset version's
+    `quality_report_json` was written by Phase 3 code, before Step 12's
+    `included_internal_ids` field existed. **Not patched retroactively** -- an old
+    record correctly doesn't have data that didn't exist when it was created; this is
+    surfaced, not silently backfilled with fabricated data.
+  - Created a **new** `dataset_v2` (5 symbols, current code path) and generated its
+    manifest: `internal_ids` fully populated (`FIN-0001`..`FIN-0005`), quality score
+    composite **100.0** (completeness/integrity/coverage/freshness/corporate_action_validation
+    all 100.0) -- real, verified, checksum `sha256:0d5af5551f...`.
 
 **Open blocker for Step 6/7 (Nifty100/500):** `core/universe.py`'s bundled
 `nse_equity_list.csv` is NSE's full listed-equity snapshot with no index-membership
