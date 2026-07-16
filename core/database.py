@@ -117,17 +117,51 @@ class NewsSentiment(Base):
 
 
 class Prediction(Base):
-    """A stored ML model prediction for a ticker on a given date."""
+    """A stored ML model prediction for a ticker on a given (target session) date.
+
+    Defined since an early phase but never populated by any code path until the
+    Explainable-AI platform phase (Phase 5, Historical Intelligence) -- confirmed dead
+    via a repo-wide search for `Prediction(` during the Phase 1 audit. `core.ml
+    .prediction_tracking` is now the one write path (record_prediction) and one
+    resolution path (resolve_pending_outcomes) for this table.
+
+    No DB-level UNIQUE constraint on (ticker_id, date, model_version): SQLite can't add
+    one to a table that already exists on disk without a full table rebuild (the same
+    constraint already documented on `Portfolio.name` above, and additive-only schema
+    changes are a hard project rule -- no destructive rebuild, even of an empty table,
+    without explicit authorization). `record_prediction` enforces this uniqueness at the
+    application layer instead (query-then-insert), the same pattern this codebase
+    already uses for `Portfolio.name`.
+
+    `model_version` is declared VARCHAR(64) here (was VARCHAR(32) when this class was
+    first added) to fit real registry version strings like
+    "finsight_direction_classifier_v1" (34 chars) -- but since SQLite has no real
+    per-column length enforcement (TEXT affinity ignores the declared length entirely),
+    the on-disk DDL from whenever this table was first created may still literally read
+    VARCHAR(32); this is cosmetic on SQLite specifically and was left as-is rather than
+    forcing a schema rebuild to correct a label that was never actually enforced.
+    """
 
     __tablename__ = "predictions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     ticker_id: Mapped[int] = mapped_column(ForeignKey("tickers.id"), nullable=False, index=True)
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
-    model_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    model_version: Mapped[str] = mapped_column(String(64), nullable=False)
     predicted_direction: Mapped[int] = mapped_column(Integer, nullable=False)
     probability: Mapped[float] = mapped_column(Float, nullable=False)
     actual_direction: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Explainable-AI platform phase (additive): everything Phase 5's accuracy-by-bucket
+    # and accuracy-by-regime breakdowns need, captured at prediction time rather than
+    # recomputed at resolution time (the confidence band or regime an earlier prediction
+    # was made under must not silently change if later code changes how those are
+    # computed -- history has to reflect what was actually shown to the user then).
+    confidence_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    confidence_level: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    dataset_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    market_regime: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    recorded_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     ticker: Mapped["Ticker"] = relationship(back_populates="predictions")
 
@@ -150,13 +184,23 @@ class Watchlist(Base):
 
 
 class Portfolio(Base):
-    """A named collection of holdings."""
+    """A named collection of holdings. `name` is enforced unique at the application
+    layer (`core.portfolio.create_portfolio`), not a DB-level UNIQUE constraint --
+    SQLite can't add one to a table that already holds live rows without a full
+    table rebuild, the same constraint documented on `Price.internal_id` above; a
+    fresh install's `create_all()` also doesn't add one for the same "smallest safe
+    change" reason this codebase already applies elsewhere.
+    """
 
     __tablename__ = "portfolios"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Additive (Portfolio Management fix): bumped explicitly by core.portfolio
+    # whenever a holding under this portfolio is added/edited/deleted, so "last
+    # modified" reflects portfolio activity, not just row-edits to Portfolio itself.
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, onupdate=func.now())
 
     holdings: Mapped[list["Holding"]] = relationship(back_populates="portfolio", cascade="all, delete-orphan")
 
@@ -287,6 +331,18 @@ class MLModelRegistry(Base):
     git_commit_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     is_active: Mapped[bool] = mapped_column(nullable=False, default=False)
+    # Explainable-AI platform phase (additive): a single scalar temperature (Guo et al.
+    # 2017 temperature scaling, via core.ml.calibration) fit once against this model's
+    # own held-out validation split, applied at serving time to turn a raw predict_proba
+    # output into a calibrated probability. NULL until fit_and_store_calibration() has
+    # been run for this version -- callers must treat NULL as "uncalibrated", never
+    # silently assume 1.0.
+    calibration_temperature: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Status lifecycle beyond the pre-existing boolean is_active. One of "active" /
+    # "testing" / "archived" (core.ml.registry.MODEL_STATUSES) -- additive, does not
+    # replace is_active (get_active_model still keys off is_active for backward
+    # compatibility with the Phase 3 pipeline).
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
 
 
 class MLImprovementIteration(Base):
@@ -524,6 +580,16 @@ _ADDITIVE_COLUMN_MIGRATIONS: list[tuple[str, str, str]] = [
     ("ml_training_runs", "calibration_results_json", "TEXT"),
     ("ml_training_runs", "feature_importance_json", "TEXT"),
     ("ml_training_runs", "notes", "VARCHAR(1024)"),
+    ("portfolios", "updated_at", "DATETIME"),
+    # Explainable-AI platform phase
+    ("ml_model_registry", "calibration_temperature", "FLOAT"),
+    ("ml_model_registry", "status", "VARCHAR(16) DEFAULT 'active'"),
+    ("predictions", "confidence_score", "FLOAT"),
+    ("predictions", "confidence_level", "VARCHAR(16)"),
+    ("predictions", "dataset_version", "VARCHAR(64)"),
+    ("predictions", "market_regime", "VARCHAR(64)"),
+    ("predictions", "recorded_at", "DATETIME"),
+    ("predictions", "resolved_at", "DATETIME"),
 ]
 
 

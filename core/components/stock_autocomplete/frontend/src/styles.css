@@ -1,0 +1,137 @@
+:root {
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.sa-root {
+  font-family: "Source Sans Pro", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  /* #e8e9ed = core/design.py's TEXT_PRIMARY / core/theme.py's DARK_INK_PRIMARY */
+  color: var(--sa-fg, #e8e9ed);
+}
+
+.sa-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.sa-combobox {
+  position: relative;
+}
+
+.sa-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: var(--sa-bg, #0e1117);
+  color: inherit;
+  font-size: 1rem;
+  touch-action: manipulation;
+}
+
+.sa-input:focus {
+  /* #2a78d6 = core/design.py's ACCENT / core/theme.py's CATEGORICAL[0] -- the same
+     accent used for buttons/focus rings everywhere else, not Streamlit's default
+     red (this was the one place in the app using an off-palette accent color). */
+  outline: 2px solid #2a78d6;
+  outline-offset: -1px;
+}
+
+.sa-listbox {
+  position: absolute;
+  z-index: 999;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  background: var(--sa-bg, #0e1117);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.sa-status {
+  padding: 0.5rem 0.75rem;
+  color: rgba(128, 128, 128, 0.9);
+  font-style: italic;
+}
+
+.sa-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  min-height: 44px; /* comfortable touch target */
+}
+
+.sa-option-active,
+.sa-option:hover {
+  background: rgba(42, 120, 214, 0.15);
+}
+
+.sa-option-symbol {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.sa-option-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(200, 200, 200, 0.9);
+}
+
+.sa-option-meta {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  color: rgba(128, 128, 128, 0.9);
+}
+
+.sa-badge {
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.sa-badge-watchlist {
+  /* #fab219 = core/design.py's WARNING / core/theme.py's STATUS_WARNING */
+  background: rgba(250, 178, 25, 0.2);
+  color: #fab219;
+}
+
+.sa-badge-portfolio {
+  /* #0ca30c = core/design.py's SUCCESS / core/theme.py's STATUS_GOOD */
+  background: rgba(12, 163, 12, 0.2);
+  color: #0ca30c;
+}
+
+mark {
+  background: rgba(42, 120, 214, 0.35);
+  color: inherit;
+  border-radius: 0.15rem;
+  padding: 0 0.05rem;
+}
+
+@media (prefers-color-scheme: light) {
+  .sa-input,
+  .sa-listbox {
+    --sa-bg: #ffffff;
+    --sa-fg: #31333f;
+  }
+}

@@ -12,8 +12,6 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, timezone
 
-from sqlalchemy import select
-
 from core.config import get_logger
 from core.database import CheckpointState
 

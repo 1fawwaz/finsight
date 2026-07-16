@@ -1,0 +1,123 @@
+{
+  "equities": {
+    "RELIANCE-EQ": {
+      "request": {
+        "instrument_tokens": [
+          {
+            "instrument_token": "2885",
+            "exchange_segment": "nse_cm"
+          }
+        ],
+        "quote_type": "ltp"
+      },
+      "response": [
+        {
+          "exchange_token": "2885",
+          "display_symbol": "RELIANCE-EQ",
+          "exchange": "nse_cm",
+          "ltp": "1296.6000"
+        }
+      ],
+      "latency_s": 1.0150000000139698
+    },
+    "TCS-EQ": {
+      "request": {
+        "instrument_tokens": [
+          {
+            "instrument_token": "11536",
+            "exchange_segment": "nse_cm"
+          }
+        ],
+        "quote_type": "ltp"
+      },
+      "response": [
+        {
+          "exchange_token": "11536",
+          "display_symbol": "TCS-EQ",
+          "exchange": "nse_cm",
+          "ltp": "2201.0000"
+        }
+      ],
+      "latency_s": 1.0469999999622814
+    },
+    "INFY-EQ": {
+      "request": {
+        "instrument_tokens": [
+          {
+            "instrument_token": "1594",
+            "exchange_segment": "nse_cm"
+          }
+        ],
+        "quote_type": "ltp"
+      },
+      "response": [
+        {
+          "exchange_token": "1594",
+          "display_symbol": "INFY-EQ",
+          "exchange": "nse_cm",
+          "ltp": "1082.4000"
+        }
+      ],
+      "latency_s": 0.9839999999967404
+    }
+  },
+  "indices": {
+    "NIFTY": {
+      "request": {
+        "instrument_tokens": [
+          {
+            "instrument_token": "26000",
+            "exchange_segment": "nse_cm"
+          }
+        ],
+        "quote_type": "ltp"
+      },
+      "response": {
+        "fault": {
+          "code": "400",
+          "description": "Please pass valid neosymbol values for getQuote",
+          "message": "Invalid neosymbol values"
+        }
+      },
+      "latency_s": 1.0940000000409782
+    },
+    "BANKNIFTY": {
+      "request": {
+        "instrument_tokens": [
+          {
+            "instrument_token": "26009",
+            "exchange_segment": "nse_cm"
+          }
+        ],
+        "quote_type": "ltp"
+      },
+      "response": {
+        "fault": {
+          "code": "400",
+          "description": "Please pass valid neosymbol values for getQuote",
+          "message": "Invalid neosymbol values"
+        }
+      },
+      "latency_s": 1.077999999979511
+    },
+    "SENSEX": {
+      "request": {
+        "instrument_tokens": [
+          {
+            "instrument_token": "1",
+            "exchange_segment": "bse_cm"
+          }
+        ],
+        "quote_type": "ltp"
+      },
+      "response": {
+        "fault": {
+          "code": "400",
+          "description": "Please pass valid neosymbol values for getQuote",
+          "message": "Invalid neosymbol values"
+        }
+      },
+      "latency_s": 1.172000000020489
+    }
+  }
+}

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import date as date_type
 from datetime import datetime, timezone
 
 import yfinance as yf
@@ -71,6 +70,7 @@ def fetch_news(symbol: str, limit: int = 10) -> list[NewsArticle]:
                 datetime.fromisoformat(pub_date_str.replace("Z", "+00:00")) if pub_date_str else datetime.now(timezone.utc)
             )
         except ValueError:
+            logger.debug("Unparseable pubDate %r for %s article %r; using current time instead", pub_date_str, symbol, title)
             published_at = datetime.now(timezone.utc)
         provider = content.get("provider") or {}
         canonical_url = content.get("canonicalUrl") or {}

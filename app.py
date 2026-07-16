@@ -10,24 +10,33 @@ import streamlit as st
 from core.config import BENCHMARK_BANKNIFTY, BENCHMARK_NIFTY50, BENCHMARK_SENSEX, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
 from core.database import init_db
+from core.design import inject_design_system
 from core.formatting import format_inr
 from core.market_status import get_nse_market_status
 from core.market_summary import MarketSnapshot, summarize_market
 from core.portfolio import list_holdings, list_portfolios
 from core.queries import get_price_history
-from core.ui_components import RECENT_SEARCHES_KEY, display_symbol, render_mode_toggle, stock_search_and_pick
+from core.ui_components import (
+    RECENT_SEARCHES_KEY,
+    display_symbol,
+    render_empty_state,
+    render_live_index_cards,
+    render_mode_toggle,
+    render_page_header,
+    stock_search_and_pick,
+)
 from core.watchlist import list_watchlist, seed_default_watchlist_if_empty
 
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="FinSight", page_icon="\U0001F4C8", layout="wide")
+inject_design_system()
 
 init_db()
 seed_default_watchlist_if_empty()
 mode = render_mode_toggle()
 
-st.title("FinSight")
-st.caption("AI Finance & Trading Intelligence Platform · Indian markets (NSE/BSE)")
+render_page_header("FinSight", "AI Finance & Trading Intelligence Platform · Indian markets (NSE/BSE)")
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -61,19 +70,25 @@ if not status.is_open:
     next_session_label = "today" if status.next_trading_day == status.current_time_ist.date() else status.next_trading_day.strftime("%A, %d %b")
     st.caption(f"Next trading session: {next_session_label}")
 
-index_cols = st.columns(3)
 index_specs = [("Nifty 50", BENCHMARK_NIFTY50), ("Sensex", BENCHMARK_SENSEX), ("Bank Nifty", BENCHMARK_BANKNIFTY)]
 index_pcts: dict[str, float | None] = {}
-for col, (label, symbol) in zip(index_cols, index_specs):
+index_last_close: dict[str, float] = {}
+for label, symbol in index_specs:
     with st.spinner(f"Loading {label}..."):
         history = _ensure_history(symbol)
     if history.empty:
-        col.metric(label, "—")
         continue
     close = history["close"]
     pct = _pct_change(close, 1)
     index_pcts[symbol] = pct
-    col.metric(label, f"{close.iloc[-1]:,.2f}", f"{pct:+.2%}" if pct is not None else None)
+    index_last_close[symbol] = float(close.iloc[-1])
+
+# Live-updating when the active broker's credentials are configured (routed via
+# core/broker_adapter.py::get_active_broker_adapter() -- Upstox or Kotak Neo,
+# whichever USE_UPSTOX_PRIMARY selects); falls back to the historical values just
+# computed above when a live tick isn't available yet -- historical computation
+# itself (index_pcts, used later for the AI market summary) is unchanged either way.
+render_live_index_cards(index_specs, index_last_close, index_pcts)
 
 st.divider()
 
@@ -92,7 +107,7 @@ with col_portfolio:
     if any_holdings:
         st.metric("Across all portfolios" if mode == "Professional" else "What your holdings are worth", format_inr(total_value))
     else:
-        st.caption("No holdings yet.")
+        render_empty_state("No holdings yet", "Add your first stock on the Portfolio page to see its value here.", icon="\U0001F4BC")
     st.page_link("pages/3_Portfolio.py", label="Go to Portfolio →")
 
 watchlist_rows: list[dict] = []
@@ -125,7 +140,7 @@ with col_watchlist:
             },
         )
     else:
-        st.caption("Your watchlist is empty.")
+        render_empty_state("Your watchlist is empty", "Add a stock on the Market Overview page to track it here.", icon="\U0001F440")
     st.page_link("pages/1_Market_Overview.py", label="Manage watchlist →")
 
 st.divider()
@@ -172,7 +187,7 @@ with col_recent:
         for symbol in recent_searches:
             st.markdown(f"- **{display_symbol(symbol)}**")
     else:
-        st.caption("Search for a stock anywhere in the app and it'll show up here.")
+        render_empty_state("No recent searches", "Search for a stock anywhere in the app and it'll show up here.", icon="\U0001F50D")
 
 with col_quick:
     st.subheader("Quick Search")

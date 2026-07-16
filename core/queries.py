@@ -16,6 +16,16 @@ def list_ticker_symbols() -> list[str]:
         return sorted(session.execute(select(Ticker.symbol)).scalars().all())
 
 
+def list_all_tickers() -> list[dict]:
+    """Every ticker row as {symbol, name, sector}, for building a search index
+    supplement out of symbols a user has already caused to be ingested but that
+    aren't (yet, or ever) in the bundled NSE reference snapshot -- e.g. a valid BSE
+    symbol, or a symbol added before the snapshot was last refreshed."""
+    with get_session() as session:
+        rows = session.execute(select(Ticker)).scalars().all()
+        return [{"symbol": t.symbol, "name": t.name, "sector": t.sector} for t in rows]
+
+
 def get_ticker_info(symbol: str) -> Optional[dict]:
     """Return {symbol, name, sector} for a ticker, or None if it isn't in the DB."""
     with get_session() as session:

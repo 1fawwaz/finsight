@@ -5,20 +5,21 @@ import streamlit as st
 
 from core.chat import ConversationMemory, answer_question
 from core.database import init_db
-from core.ui_components import render_mode_toggle, render_prediction_disclaimer
+from core.design import inject_design_system
+from core.ui_components import render_mode_toggle, render_page_header, render_prediction_disclaimer
 
 st.set_page_config(page_title="FinSight | Ask FinSight AI", page_icon="\U0001F4C8", layout="wide")
-st.title("Ask FinSight AI")
+inject_design_system()
+render_page_header(
+    "Ask FinSight AI",
+    "Ask about any NSE-listed stock, your portfolio, or today's market. Answers are grounded in "
+    "FinSight's own data (prices, indicators, fundamentals, sentiment, ML signals) -- not generic "
+    "knowledge -- and follow-ups like \"What about Infosys?\" remember what you were just discussing.",
+)
 
 init_db()
 mode = render_mode_toggle()
 
-st.caption(
-    "Ask about any NSE-listed stock, your portfolio, or today's market. Answers are grounded "
-    "in FinSight's own data (prices, indicators, fundamentals, sentiment, ML signals) -- not "
-    "generic knowledge -- and follow-ups like \"What about Infosys?\" remember what you were "
-    "just discussing."
-)
 render_prediction_disclaimer()
 
 if "chat_history" not in st.session_state:

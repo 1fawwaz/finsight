@@ -16,3 +16,24 @@ xgboost==3.3.0
 lightgbm==4.6.0
 optuna==4.9.0
 shap==0.52.0
+
+# Kotak Neo live market data integration. neo_api_client's own metadata pins
+# websockets==8.1/numpy==2.1.0/certifi==2022.12.7/pandas==2.2.3/python-dotenv==1.0.0
+# exactly -- installing it with those exact pins breaks yfinance outright
+# (yfinance's live.py imports websockets.sync.client, which doesn't exist before
+# websockets 13). Confirmed empirically that neo_api_client itself imports and its
+# actual WebSocket connection (HSWebSocketLib.py uses the separate `websocket-client`
+# package, not `websockets`) works fine against the newer versions already pinned
+# above -- the floors below just guarantee `pip install -r requirements.txt` never
+# regresses to neo_api_client's stale exact pins again.
+pyotp==2.10.0
+websockets>=13.0
+certifi>=2024.2.2
+neo_api_client @ git+https://github.com/Kotak-Neo/Kotak-neo-api-v2.git@v2.0.2
+
+# Upstox live market data integration (Upstox Primary / Kotak Neo Secondary broker
+# adapter migration). Installed cleanly alongside every pin above -- `pip check`
+# reports zero conflicts caused by this package itself (the only warnings it surfaces
+# are the pre-existing, already-documented neo_api_client==2.0.0 pin mismatches from
+# the Kotak Neo integration above, unrelated to upstox-python-sdk).
+upstox-python-sdk==2.28.0

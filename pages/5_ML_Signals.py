@@ -8,9 +8,13 @@ from core import theme
 from core.backtester import walk_forward_backtest
 from core.config import DEFAULT_TICKERS, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
+from core.design import inject_design_system
 from core.explain import explain_ml_prediction
 from core.market_status import prediction_target_session
-from core.ml_model import make_dataset, predict_next_direction
+from core.ml.performance import performance_by_confidence_bucket
+from core.ml.prediction_service import generate_prediction
+from core.ml.prediction_tracking import record_prediction, resolve_pending_outcomes
+from core.ml_model import make_dataset
 from core.queries import get_price_history
 from core.sentiment import get_stored_sentiment
 from core.ui_components import (
@@ -18,14 +22,17 @@ from core.ui_components import (
     render_ai_panel,
     render_explanation,
     render_mode_toggle,
+    render_page_header,
     render_prediction_disclaimer,
+    render_prediction_result,
     stock_picker,
 )
 
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="FinSight | ML Signals", page_icon="\U0001F4C8", layout="wide")
-st.title("ML Signals")
+inject_design_system()
+render_page_header("ML Signals", "Walk-forward-backtested direction classifier with honest accuracy reporting.")
 
 mode = render_mode_toggle()
 
@@ -61,11 +68,15 @@ def _run_backtest(symbol: str, train_window: int, test_window: int):
     return walk_forward_backtest(features, labels, history["close"], train_window=train_window, test_window=test_window)
 
 
-@st.cache_data(ttl=900, show_spinner=False)
 def _predict_next(symbol: str):
+    """Not `st.cache_data`-wrapped like the other loaders here: `PredictionResult` isn't
+    a plain hashable/serializable value (it holds nested dataclasses added across later
+    Explainable-AI phases), and the underlying `predict_next_direction` call it wraps is
+    already cheap (registry inference is ~28ms) -- caching would add complexity for
+    negligible benefit."""
     history = _load_history(symbol)
     sentiment_series = _load_sentiment_series(symbol)
-    return predict_next_direction(history, sentiment_by_date=sentiment_series)
+    return generate_prediction(symbol, history, sentiment_by_date=sentiment_series)
 
 
 symbol = stock_picker("ml_signals_symbol", default_symbol=DEFAULT_TICKERS[0])
@@ -90,29 +101,40 @@ target_session_label = target_session.strftime("%A, %d %b")
 st.divider()
 st.subheader("Next Trading Session's Guess" if mode == "Simple" else "Next-Session Prediction")
 st.caption(f"Predicting for the next trading session: **{target_session_label}**.")
-next_prediction = _predict_next(symbol)
-if next_prediction is None:
-    st.caption("Not enough history yet to make a prediction for this ticker.")
-else:
-    predicted_up, probability_up = next_prediction
-    has_backtest = st.session_state.get("ml_symbol") == symbol and "ml_result" in st.session_state
-    historical_accuracy = st.session_state["ml_result"].accuracy if has_backtest else 0.55
-    pred_cols = st.columns([1, 3])
-    pred_cols[0].metric(
-        "Direction" if mode == "Professional" else "Guess",
-        "⬆ Up" if predicted_up else "⬇ Down",
-        f"{probability_up:.0%} confidence" if mode == "Professional" else None,
-    )
-    with pred_cols[1]:
+prediction_result = _predict_next(symbol)
+render_prediction_result(prediction_result, mode, price_df=history, sentiment_by_date=_load_sentiment_series(symbol))
+
+# Historical Intelligence (Phase 5): record this prediction for later outcome
+# resolution, and resolve any of this symbol's earlier predictions whose target
+# session has since actually happened. Both are best-effort, deliberately separate
+# from generate_prediction (a pure/read function) -- a DB write must never be a hidden
+# side effect of computing a result.
+if prediction_result.has_prediction:
+    try:
+        record_prediction(symbol, target_session, prediction_result)
+        resolve_pending_outcomes(symbol)
+    except Exception as exc:
+        logger.warning("Prediction tracking failed for %s: %s", symbol, exc)
+next_prediction = (
+    (prediction_result.confidence.prediction_class == "UP", prediction_result.confidence.probability_up)
+    if prediction_result.has_prediction
+    else None
+)
+has_backtest = st.session_state.get("ml_symbol") == symbol and "ml_result" in st.session_state
+if prediction_result.has_prediction:
+    if not has_backtest:
+        st.caption(
+            "Run the backtest below to see exactly how often this model has been right for "
+            f"{display_symbol(symbol)} historically."
+        )
+    else:
         render_explanation(
-            explain_ml_prediction(predicted_up, probability_up, historical_accuracy, target_session_label),
+            explain_ml_prediction(
+                next_prediction[0], next_prediction[1], st.session_state["ml_result"].accuracy, target_session_label,
+                include_probability=False,
+            ),
             mode,
         )
-        if not has_backtest:
-            st.caption(
-                "Run the backtest below to see exactly how often this model has been right for "
-                f"{display_symbol(symbol)} historically -- the number above uses a general baseline until then."
-            )
 
 if st.button("Run Walk-Forward Backtest"):
     with st.spinner(f"Training and backtesting on {display_symbol(symbol)} (this walks forward year by year, so it takes a bit)..."):
@@ -199,7 +221,6 @@ ml_ai_data = {
 }
 if next_prediction is not None:
     ml_ai_data["next_day_predicted_direction"] = "up" if next_prediction[0] else "down"
-    ml_ai_data["next_day_probability_up"] = round(float(next_prediction[1]), 3)
 ml_fallback = (
     f"Out of every 10 guesses this computer made in the past, about {round(result.accuracy * 10)} were right. "
     "That's only a little better than flipping a coin -- so treat it as a hint, not a promise."
@@ -209,6 +230,33 @@ ml_fallback = (
     "equity direction classifiers."
 )
 render_ai_panel(f"ML direction-classifier results for {display_symbol(symbol)}", ml_ai_data, ml_fallback, mode)
+
+st.divider()
+st.subheader("Live AI Track Record" if mode == "Simple" else "Historical Intelligence (Live Predictions)")
+st.caption(
+    "Unlike the walk-forward backtest above (which retrains and tests on historical data), this tracks the "
+    f"actual live predictions {display_symbol(symbol)} has shown on this page over time, resolved against what "
+    "really happened."
+)
+live_perf = prediction_result.historical_performance
+if live_perf is not None and live_perf.n > 0:
+    live_cols = st.columns(4)
+    live_cols[0].metric("Accuracy" if mode == "Professional" else "Right guesses", f"{live_perf.accuracy:.1%}")
+    live_cols[1].metric("Precision" if mode == "Professional" else "Right when it said 'up'", f"{live_perf.precision:.1%}")
+    live_cols[2].metric("Recall" if mode == "Professional" else "Caught real 'up' days", f"{live_perf.recall:.1%}")
+    live_cols[3].metric("Resolved live predictions", f"{live_perf.n}")
+    if mode == "Professional":
+        by_bucket = performance_by_confidence_bucket(symbol=symbol, model_version=prediction_result.model_version)
+        if by_bucket:
+            st.caption("Accuracy by confidence bucket:")
+            bucket_cols = st.columns(len(by_bucket))
+            for col, (level, stats) in zip(bucket_cols, sorted(by_bucket.items())):
+                col.metric(level, f"{stats.accuracy:.0%}", f"n={stats.n}")
+else:
+    st.caption(
+        "No resolved live predictions yet for this symbol -- come back after this page has made a prediction and "
+        "the target trading session has passed, so it can be checked against what actually happened."
+    )
 
 st.divider()
 st.caption("FinSight is a signal-research and education tool. Nothing shown here is financial advice.")

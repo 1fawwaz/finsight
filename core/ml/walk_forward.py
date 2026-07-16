@@ -25,7 +25,10 @@ import numpy as np
 import pandas as pd
 
 from core.backtester import BacktestResult, walk_forward_backtest
+from core.config import get_logger
 from core.ml.cv import CVFold, assert_no_chronological_leakage, time_series_cv_folds
+
+logger = get_logger(__name__)
 
 
 def rolling_window_folds(features: pd.DataFrame, train_window: int, test_window: int) -> list[CVFold]:
@@ -136,7 +139,11 @@ def run_rolling_window_validation(
         try:
             backtest: BacktestResult = walk_forward_backtest(features, labels, close, train_window=train_window, test_window=test_window)
             mean_accuracy, mean_precision, mean_recall = backtest.accuracy, backtest.precision, backtest.recall
-        except ValueError:
+        except ValueError as exc:
+            logger.warning(
+                "rolling_window_validation_config_failed train_window=%d test_window=%d error=%s",
+                train_window, test_window, exc,
+            )
             mean_accuracy = mean_precision = mean_recall = float("nan")
 
         results.append(
@@ -169,7 +176,8 @@ def run_expanding_window_validation(
     for n_folds in n_folds_list:
         try:
             folds = time_series_cv_folds(features, n_folds=n_folds)
-        except ValueError:
+        except ValueError as exc:
+            logger.warning("expanding_window_validation_config_failed n_folds=%d error=%s", n_folds, exc)
             results.append(
                 WindowConfigResult(
                     style="expanding", config={"n_folds": n_folds}, n_folds=0,

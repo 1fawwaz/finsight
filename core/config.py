@@ -15,6 +15,29 @@ DATA_DIR.mkdir(exist_ok=True)
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{(DATA_DIR / 'finsight.db').as_posix()}")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
+# Kotak Neo live market data (quotes/streaming only -- see core/kotak_market_data.py's
+# module docstring for the explicit scope boundary: no trading/order/portfolio APIs).
+# Read the same way every other secret in this file is: os.getenv from .env, never
+# hardcoded, never logged.
+KOTAK_CONSUMER_KEY = os.getenv("KOTAK_CONSUMER_KEY", "").strip()
+KOTAK_MOBILE_NUMBER = os.getenv("KOTAK_MOBILE_NUMBER", "").strip()
+KOTAK_UCC = os.getenv("KOTAK_UCC", "").strip()
+KOTAK_MPIN = os.getenv("KOTAK_MPIN", "").strip()
+KOTAK_TOTP_SECRET = os.getenv("KOTAK_TOTP_SECRET", "").strip()
+KOTAK_ENVIRONMENT = os.getenv("KOTAK_ENVIRONMENT", "prod").strip().lower()
+
+# Upstox live market data (quotes/streaming only -- see core/upstox_market_data.py's
+# module docstring for the confirmed real SDK details and the explicit scope
+# boundary). Same os.getenv-from-.env pattern as every other secret in this file.
+UPSTOX_ANALYTICS_TOKEN = os.getenv("UPSTOX_ANALYTICS_TOKEN", "").strip()
+
+# Broker adapter migration feature flags (core/broker_adapter.py). These are also
+# re-read fresh at request time by that module's own _read_flags() -- the constants
+# here are a stable snapshot (at process start) for anything that wants one (e.g.
+# startup logging), not what routing decisions are made from.
+USE_UPSTOX_PRIMARY = os.getenv("USE_UPSTOX_PRIMARY", "false").strip().lower() == "true"
+USE_KOTAK_SECONDARY = os.getenv("USE_KOTAK_SECONDARY", "false").strip().lower() == "true"
+
 # Every Gemini call site passes this as its request timeout. Measured Gemini latency can
 # exceed the Phase 0 "AI response under 8s" budget on a slow connection; without a
 # client-side timeout, google-generativeai blocks indefinitely and the UI just hangs on

@@ -18,15 +18,13 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from datetime import date, datetime
 
-import numpy as np
 import pandas as pd
 from sqlalchemy import select
 
 from core.config import get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
-from core.database import MLDatasetVersion, Price, Ticker, get_session
+from core.database import MLDatasetVersion, get_session
 from core.queries import get_price_history
 from core.symbol_registry import get_or_create as get_or_create_symbol_registry_entry
 

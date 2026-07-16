@@ -5,6 +5,7 @@ portfolio holdings already are."""
 from __future__ import annotations
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from core.config import DEFAULT_TICKERS, get_logger
 from core.data_ingestion import ingest_ticker
@@ -15,15 +16,32 @@ logger = get_logger(__name__)
 
 
 def list_watchlist() -> list[dict]:
-    """Watchlist tickers as {id, symbol, name, sector} dicts, oldest-added first."""
+    """Watchlist tickers as {id, symbol, name, sector} dicts, oldest-added first.
+
+    Eager-loads each entry's `ticker` relationship in one batched query
+    (`selectinload`) instead of lazy-loading it one row at a time -- the same N+1
+    pattern found and fixed in `core.portfolio.list_holdings` this session (see
+    `BUG_FIX_REPORT.md`), independently present here too.
+    """
     with get_session() as session:
         rows = session.execute(
-            select(Watchlist).join(Ticker).order_by(Watchlist.added_at)
+            select(Watchlist).join(Ticker).order_by(Watchlist.added_at).options(selectinload(Watchlist.ticker))
         ).scalars().all()
         return [
             {"id": w.id, "symbol": w.ticker.symbol, "name": w.ticker.name, "sector": w.ticker.sector}
             for w in rows
         ]
+
+
+def get_all_watchlist_symbols() -> set[str]:
+    """Every symbol currently on the watchlist, as a set -- for the search engine's
+    personalization boost, which only needs O(1) membership, not the full row detail
+    `list_watchlist` returns."""
+    with get_session() as session:
+        rows = session.execute(
+            select(Ticker.symbol).join(Watchlist, Watchlist.ticker_id == Ticker.id).distinct()
+        ).scalars().all()
+        return set(rows)
 
 
 def is_in_watchlist(symbol: str) -> bool:

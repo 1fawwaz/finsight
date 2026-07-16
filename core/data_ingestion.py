@@ -7,9 +7,11 @@ from datetime import date as date_type
 from typing import Optional
 
 import pandas as pd
+import requests
 import yfinance as yf
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from yfinance.exceptions import YFException
 
 from core.config import DEFAULT_TICKERS, HISTORY_PERIOD, UNSUPPORTED_MARKET_MESSAGE, get_logger, is_supported_symbol
 from core.database import Price, Ticker, get_session, init_db
@@ -22,6 +24,19 @@ logger = get_logger(__name__)
 
 class IngestionError(Exception):
     """Raised when a ticker's data cannot be fetched or is invalid."""
+
+
+# The ingestion boundary's contract: `fetch_price_history` returns a DataFrame or
+# raises exactly `IngestionError` -- never a raw provider/network exception. Only
+# these two exception families are normalized into it: `requests.exceptions
+# .RequestException` (the base class for every network failure `requests`/yfinance's
+# HTTP layer raises -- ConnectionError, Timeout, HTTPError, SSLError, a wrapped DNS
+# failure, etc.) and yfinance's own `YFException` family (YFRateLimitError,
+# YFTickerMissingError, YFPricesMissingError, ...). A genuine programming bug in this
+# codebase (a TypeError, AttributeError, KeyError from our own code, not the provider)
+# is deliberately *not* caught here -- masking it as "provider trouble" would hide a
+# real defect instead of surfacing it.
+_EXPECTED_PROVIDER_EXCEPTIONS = (requests.exceptions.RequestException, YFException)
 
 
 def get_or_create_ticker(session, symbol: str) -> Ticker:
@@ -89,6 +104,36 @@ def _classify_failure(exc: Exception) -> str:
     return "connection_error"
 
 
+def _record_fetch_failure(symbol: str, exc: Exception, start: float) -> None:
+    """Structured failure logging + provider-health DB write for a failed fetch.
+
+    Never raises itself -- a failure recording this must never mask the real fetch
+    failure it's recording (the DB write is wrapped in its own try/except for exactly
+    that reason). `extra=` carries the structured fields (provider, symbol, exception
+    type/message, execution time) on the LogRecord for any handler that wants them,
+    without changing what the shared text formatter (`core.config.get_logger`) prints.
+    """
+    latency_ms = int((time.monotonic() - start) * 1000)
+    logger.error(
+        "Market data ingestion failed",
+        extra={
+            "provider": "yfinance",
+            "symbol": symbol,
+            "exception": type(exc).__name__,
+            # NOT "message" -- that's a reserved LogRecord attribute name (`Formatter
+            # .format()` sets it via `record.getMessage()`); passing it through
+            # `extra=` raises `KeyError: "Attempt to overwrite 'message' in LogRecord"`.
+            "error_message": str(exc),
+            "execution_time_ms": latency_ms,
+        },
+    )
+    try:
+        with get_session() as session:
+            record_call(session, "yfinance", success=False, latency_ms=latency_ms, failure_type=_classify_failure(exc))
+    except Exception as health_exc:  # provider-health logging must never mask the real fetch failure
+        logger.warning("Provider health logging failed (fetch failure still raised): %s", health_exc)
+
+
 def fetch_price_history(symbol: str, period: str = HISTORY_PERIOD) -> pd.DataFrame:
     """Download OHLCV history for a symbol from yfinance and validate it.
 
@@ -100,19 +145,36 @@ def fetch_price_history(symbol: str, period: str = HISTORY_PERIOD) -> pd.DataFra
     exception) is already determined, and any provider-health error is logged, not
     raised, to keep this function's actual contract (return a DataFrame or raise on a
     real fetch problem) unchanged.
+
+    Always raises `IngestionError` on failure, never a raw network/library exception --
+    this is the ingestion boundary's contract (see `_EXPECTED_PROVIDER_EXCEPTIONS`).
+    Found as a real bug during Production Stabilization (Reliability): before this
+    fix, a genuine network interruption (e.g. `requests.exceptions.ConnectionError`,
+    a DNS failure, a timeout, an HTTP 429/500) from `yf.Ticker(...).history()`
+    propagated as its own raw exception type instead of `IngestionError` -- every
+    call site in the app (`pages/*.py`'s `_ensure_ingested` helpers) only catches
+    `except IngestionError` to show a friendly "Couldn't fetch X" warning, so a raw
+    network exception bypassed that entirely and surfaced as an unhandled exception
+    (Streamlit's own generic error page for that rerun, not this app's intended
+    plain-language message). Reproduced live with a simulated `ConnectionError`
+    before this fix, confirmed fixed after.
     """
     start = time.monotonic()
     try:
         history = yf.Ticker(symbol).history(period=period, auto_adjust=False)
         _validate_history(symbol, history)
-    except Exception as exc:
-        latency_ms = int((time.monotonic() - start) * 1000)
-        try:
-            with get_session() as session:
-                record_call(session, "yfinance", success=False, latency_ms=latency_ms, failure_type=_classify_failure(exc))
-        except Exception as health_exc:  # provider-health logging must never mask the real fetch failure
-            logger.warning("Provider health logging failed (fetch failure still raised): %s", health_exc)
+    except IngestionError as exc:
+        # _validate_history's own classification (empty/malformed response) -- already
+        # the right exception type, just record the failure and let it propagate.
+        _record_fetch_failure(symbol, exc, start)
         raise
+    except _EXPECTED_PROVIDER_EXCEPTIONS as exc:
+        # A genuine provider/network failure -- normalize to IngestionError, chaining
+        # the original exception (`from exc`) so it's never lost for debugging.
+        _record_fetch_failure(symbol, exc, start)
+        raise IngestionError(f"Could not fetch price history for {symbol!r}: {exc}") from exc
+    # Anything else is a real programming bug, not a provider failure -- propagates
+    # unmodified rather than being masked as "provider trouble".
 
     latency_ms = int((time.monotonic() - start) * 1000)
     try:

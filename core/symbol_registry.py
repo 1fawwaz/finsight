@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from core.config import get_logger
-from core.database import Price, SymbolRegistry, Ticker, get_session
+from core.database import Price, SymbolRegistry, Ticker
 from core.universe import resolve_symbol
 
 logger = get_logger(__name__)

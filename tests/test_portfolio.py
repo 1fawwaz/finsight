@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from core.portfolio import (
+    aggregate_shares_by_symbol,
     correlation_matrix,
     cumulative_returns,
     diversification_score,
@@ -182,3 +183,39 @@ def test_monte_carlo_simulation_is_reproducible_with_seed():
 def test_monte_carlo_simulation_empty_returns_empty_df():
     assert monte_carlo_simulation(pd.Series(dtype=float), initial_value=1000.0).empty
     assert monte_carlo_simulation(pd.Series([0.01, 0.02]), initial_value=0.0).empty
+
+
+# --- aggregate_shares_by_symbol -------------------------------------------------------
+# Regression coverage for a real, confirmed bug: pages/3_Portfolio.py used to build
+# its shares dict via {h["symbol"]: h["shares"] for h in holdings}, which silently
+# dropped every lot but the last for a symbol held across more than one Add action --
+# see PORTFOLIO_IMPLEMENTATION_LOG.md "Issue #3".
+
+
+def test_aggregate_shares_by_symbol_sums_multiple_lots_of_the_same_symbol():
+    holdings = [
+        {"id": 1, "symbol": "RELIANCE.NS", "shares": 10, "avg_cost": 1200.0},
+        {"id": 2, "symbol": "RELIANCE.NS", "shares": 5, "avg_cost": 1300.0},
+    ]
+    assert aggregate_shares_by_symbol(holdings) == {"RELIANCE.NS": 15}
+
+
+def test_aggregate_shares_by_symbol_single_lot_per_symbol():
+    holdings = [
+        {"id": 1, "symbol": "RELIANCE.NS", "shares": 10, "avg_cost": 1200.0},
+        {"id": 2, "symbol": "TCS.NS", "shares": 5, "avg_cost": 2000.0},
+    ]
+    assert aggregate_shares_by_symbol(holdings) == {"RELIANCE.NS": 10, "TCS.NS": 5}
+
+
+def test_aggregate_shares_by_symbol_empty_list_returns_empty_dict():
+    assert aggregate_shares_by_symbol([]) == {}
+
+
+def test_aggregate_shares_by_symbol_three_lots_of_the_same_symbol():
+    holdings = [
+        {"id": 1, "symbol": "TCS.NS", "shares": 5, "avg_cost": 2000.0},
+        {"id": 2, "symbol": "TCS.NS", "shares": 3, "avg_cost": 2100.0},
+        {"id": 3, "symbol": "TCS.NS", "shares": 2, "avg_cost": 1900.0},
+    ]
+    assert aggregate_shares_by_symbol(holdings) == {"TCS.NS": 10}

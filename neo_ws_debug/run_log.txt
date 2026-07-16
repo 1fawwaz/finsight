@@ -1,0 +1,27 @@
+[2026-07-16T11:15:58.281502+00:00] Step 1: totp_login request
+[2026-07-16T11:15:59.487616+00:00] totp_login_result ok=True latency_s=1.20 session_token_returned=True
+[2026-07-16T11:16:00.587577+00:00] totp_validate_result ok=True latency_s=1.09 session_token_returned=True
+[2026-07-16T11:16:00.587577+00:00] kotak_auth_success -- single authentication attempt for this entire run
+[2026-07-16T11:16:05.421593+00:00] symbol_resolved symbol=RELIANCE-EQ instrument_token=2885 exchange_segment=nse_cm
+[2026-07-16T11:16:05.437328+00:00] symbol_resolved symbol=TCS-EQ instrument_token=11536 exchange_segment=nse_cm
+[2026-07-16T11:16:05.437328+00:00] symbol_resolved symbol=INFY-EQ instrument_token=1594 exchange_segment=nse_cm
+[2026-07-16T11:16:05.437328+00:00] symbol_resolved symbol=NIFTY instrument_token=26000 exchange_segment=nse_cm
+[2026-07-16T11:16:05.437328+00:00] symbol_resolved symbol=BANKNIFTY instrument_token=26009 exchange_segment=nse_cm
+[2026-07-16T11:16:08.996652+00:00] symbol_resolved symbol=SENSEX instrument_token=1 exchange_segment=bse_cm
+[2026-07-16T11:16:08.996652+00:00] Step 2: REST quotes for equities + indices
+[2026-07-16T11:16:10.018023+00:00] quotes_equity symbol=RELIANCE-EQ token=2885 latency_s=1.02
+[2026-07-16T11:16:11.060863+00:00] quotes_equity symbol=TCS-EQ token=11536 latency_s=1.05
+[2026-07-16T11:16:12.043551+00:00] quotes_equity symbol=INFY-EQ token=1594 latency_s=0.98
+[2026-07-16T11:16:13.148596+00:00] quotes_index name=NIFTY token=26000 latency_s=1.09
+[2026-07-16T11:16:14.219671+00:00] quotes_index name=BANKNIFTY token=26009 latency_s=1.08
+[2026-07-16T11:16:15.387231+00:00] quotes_index name=SENSEX token=1 latency_s=1.17
+[2026-07-16T11:16:15.387231+00:00] Step 3: fresh REST quote for RELIANCE immediately before opening the websocket
+[2026-07-16T11:16:16.575584+00:00] rest_quote_before_ws=[{'exchange_token': '2885', 'display_symbol': 'RELIANCE-EQ', 'exchange': 'nse_cm', 'ltp': '1296.6000'}]
+[2026-07-16T11:16:16.575584+00:00] Step 4: callbacks (on_open/on_message/on_error/on_close) registered
+[2026-07-16T11:16:16.575584+00:00] Step 6: subscribing RELIANCE-EQ (token=2885), observing 60s
+[2026-07-16T11:16:17.589708+00:00] first_equity_frame_saved recv_count=2
+[2026-07-16T11:17:16.619442+00:00] Step 6 result: sent_frames=2 recv_frames=3 sdk_on_message_calls=1
+[2026-07-16T11:17:16.619442+00:00] Step 7: subscribing ['NIFTY', 'BANKNIFTY', 'SENSEX'] isIndex=True, observing 120s
+[2026-07-16T11:17:17.620638+00:00] first_index_frame_saved recv_count=3
+[2026-07-16T11:19:16.687070+00:00] Step 7 result: sent_frames=3 recv_frames=3
+[2026-07-16T11:19:16.689080+00:00] logout_result=succeeded

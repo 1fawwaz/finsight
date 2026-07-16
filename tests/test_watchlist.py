@@ -2,6 +2,7 @@
 
 import pandas as pd
 import pytest
+from sqlalchemy import event
 
 from core.watchlist import (
     add_to_watchlist,
@@ -88,3 +89,30 @@ def test_seed_default_watchlist_only_runs_on_empty_watchlist(temp_db):
     seed_default_watchlist_if_empty()  # should NOT re-add the removed one
 
     assert len(list_watchlist()) == len(seeded) - 1
+
+
+def test_list_watchlist_does_not_n_plus_one(temp_db):
+    """Regression test for the same N+1 pattern found and fixed in
+    core.portfolio.list_holdings (see BUG_FIX_REPORT.md): list_watchlist used to
+    lazy-load each entry's `ticker` relationship one query at a time. Asserts the
+    SQL query count stays flat regardless of row count."""
+    from core.database import SessionLocal
+
+    for i in range(10):
+        add_to_watchlist(f"NPLUS1WATCH{i}.NS")
+
+    engine = SessionLocal.kw["bind"]
+    queries = []
+
+    def _count(conn, cursor, statement, parameters, context, executemany):
+        if statement.strip().upper().startswith("SELECT"):
+            queries.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _count)
+    try:
+        entries = list_watchlist()
+    finally:
+        event.remove(engine, "before_cursor_execute", _count)
+
+    assert len(entries) == 10
+    assert len(queries) <= 3, f"expected at most ~2-3 SELECTs (batched), got {len(queries)} -- N+1 has regressed"

@@ -13,7 +13,6 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
-from pathlib import Path
 
 import yfinance
 

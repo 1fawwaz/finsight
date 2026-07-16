@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from core.formatting import format_inr
+
 Mood = Literal["good", "neutral", "worried"]
 
 
@@ -206,9 +208,9 @@ def explain_atr(value: float | None, current_price: float | None) -> Explanation
     pct = value / current_price
     mood: Mood = "worried" if pct >= 0.03 else "good" if pct <= 0.015 else "neutral"
     return Explanation(
-        f"On a typical day, this stock's price moves up or down by about ₹{value:.2f} "
+        f"On a typical day, this stock's price moves up or down by about {format_inr(value)} "
         f"({pct:.1%} of its price) — that's how big its normal wiggles are.",
-        f"ATR(14) is {value:.2f} ({pct:.1%} of current price) -- the average daily trading range.",
+        f"ATR(14) is {format_inr(value)} ({pct:.1%} of current price) -- the average daily trading range.",
         mood,
     )
 
@@ -451,11 +453,18 @@ def explain_ml_prediction(
     probability: float,
     historical_accuracy: float,
     target_session_label: str = "the next trading session",
+    include_probability: bool = True,
 ) -> Explanation:
     """ML direction prediction: what the model is guessing, and how much to trust it.
 
     `target_session_label` should name the actual next trading session (e.g. "Tuesday, 27
     Jan") -- never "tomorrow", since tomorrow may be a weekend or exchange holiday.
+
+    `include_probability` controls whether the Professional-mode text states the raw
+    probability value (default `True`, unchanged behavior for existing callers such as
+    "Ask FinSight AI"). ML Signals' Chances-card removal passes `include_probability=False`
+    so this shared explainer never prints a probability percentage there, without
+    affecting any other caller.
     """
     direction_word = "up" if predicted_up else "down"
     accuracy_out_of_10 = round(historical_accuracy * 10)
@@ -464,12 +473,19 @@ def explain_ml_prediction(
         f"likely to go {direction_word} in {target_session_label} than the other way — but it's only "
         f"been right about {accuracy_out_of_10} times out of 10 in the past, so this is a guess, not a promise."
     )
-    professional = (
-        f"Model predicts direction={direction_word} for {target_session_label} with probability "
-        f"{probability:.1%}. Historical walk-forward accuracy is {historical_accuracy:.1%} -- barely "
-        "above chance for daily equity direction, consistent with published research. Not a trading "
-        "signal on its own."
-    )
+    if include_probability:
+        professional = (
+            f"Model predicts direction={direction_word} for {target_session_label} with probability "
+            f"{probability:.1%}. Historical walk-forward accuracy is {historical_accuracy:.1%} -- barely "
+            "above chance for daily equity direction, consistent with published research. Not a trading "
+            "signal on its own."
+        )
+    else:
+        professional = (
+            f"Model predicts direction={direction_word} for {target_session_label}. Historical walk-forward "
+            f"accuracy is {historical_accuracy:.1%} -- barely above chance for daily equity direction, "
+            "consistent with published research. Not a trading signal on its own."
+        )
     mood: Mood = "neutral"
     return Explanation(simple, professional, mood)
 

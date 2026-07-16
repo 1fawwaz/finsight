@@ -15,16 +15,14 @@ from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
-from rapidfuzz import fuzz
 
-from core.config import BENCHMARKS, DEFAULT_TICKERS, is_supported_symbol, get_logger
+from core.config import BENCHMARKS, is_supported_symbol, get_logger
 
 logger = get_logger(__name__)
 
 _UNIVERSE_CSV = Path(__file__).resolve().parent / "data" / "nse_equity_list.csv"
 
 _CORP_SUFFIX_RE = re.compile(r"\b(limited|ltd|company|corporation|corp)\b\.?", re.IGNORECASE)
-_FUZZY_SCORE_THRESHOLD = 65
 
 _BENCHMARK_ENTRIES = [
     {"symbol": symbol, "name": display_name, "series": "INDEX"}
@@ -75,101 +73,22 @@ def load_universe() -> pd.DataFrame:
     return universe
 
 
-def _best_token_match_score(query_tokens: list[str], name_tokens: list[str]) -> float:
-    """Average, over each query word, of its best fuzzy match against any word in the
-    candidate company name. Scoring per-word (rather than whole-string) keeps a typo in
-    one word ("relaince") from getting diluted or outscored by generic industry words
-    ("Insurance", "Finance", "Bank") shared across many unrelated companies."""
-    if not query_tokens or not name_tokens:
-        return 0.0
-    return sum(max(fuzz.ratio(qt, nt) for nt in name_tokens) for qt in query_tokens) / len(query_tokens)
-
-
 def search_universe(query: str, limit: int = 8) -> list[UniverseEntry]:
     """Search the NSE universe by company name or ticker (partial, case-insensitive, fuzzy).
 
-    Ranks exact/prefix symbol matches highest, then name prefix matches, then fuzzy
-    matches on name -- so typing "tat" surfaces every Tata group company, "inf" surfaces
-    Infosys, and "reliance" or "RELIANCE" both find RELIANCE.NS.
+    Thin, behavior-preserving wrapper around `core.search_engine.search_stocks` -- the
+    single consolidated search implementation for the whole app (see that module's
+    docstring for the ranking tiers, indexing strategy, and migration rationale). Kept
+    here, under this name, so every pre-existing caller (`core.ui_components`,
+    `resolve_symbol` below, and transitively `core.chat`/`core.watchlist`
+    /`core.symbol_registry`/`core.data_ingestion`) keeps working unchanged. Imports
+    `search_stocks` lazily to avoid a circular import: `core.search_engine` imports
+    `UniverseEntry`/`_clean_name`/`display_symbol`/`load_universe` from this module at
+    its own module-load time, so this module can't import back from it at load time too.
     """
-    query = query.strip()
-    if not query:
-        return []
-    universe = load_universe()
-    query_upper = query.upper()
-    bare_query = query_upper.removesuffix(".NS").removesuffix(".BO")
+    from core.search_engine import search_stocks
 
-    # An explicit, well-formed BSE symbol (e.g. "SOMECO.BO") isn't in the bundled
-    # NSE-only snapshot, so it can't be found by the matching below -- surface it
-    # directly as a synthetic top result instead, so BSE tickers stay addable even
-    # without name search.
-    if query_upper.endswith(".BO") and is_supported_symbol(query_upper) and query_upper not in set(universe["symbol"]):
-        bse_entry = [UniverseEntry(symbol=query_upper, name=f"{bare_query} (BSE)", series="BO")]
-        remaining = search_universe(bare_query, limit=limit - 1) if limit > 1 else []
-        return bse_entry + [r for r in remaining if r.symbol != query_upper]
-
-    symbol_bare = universe["symbol"].str.removesuffix(".NS")
-    exact = universe[symbol_bare == bare_query]
-    prefix_symbol = universe[symbol_bare.str.startswith(bare_query) & ~universe.index.isin(exact.index)]
-    prefix_name = universe[
-        universe["name"].str.upper().str.startswith(query_upper)
-        & ~universe.index.isin(exact.index)
-        & ~universe.index.isin(prefix_symbol.index)
-    ]
-    substring_name = universe[
-        universe["name"].str.upper().str.contains(query_upper, regex=False)
-        & ~universe.index.isin(exact.index)
-        & ~universe.index.isin(prefix_symbol.index)
-        & ~universe.index.isin(prefix_name.index)
-    ]
-
-    ranked = pd.concat([exact, prefix_symbol, prefix_name, substring_name])
-    results = [
-        UniverseEntry(symbol=row.symbol, name=row.name, series=row.series)
-        for row in ranked.head(limit).itertuples(index=False)
-    ]
-    if len(results) >= limit:
-        return results
-
-    # Fall back to fuzzy matching on company name for typos / partial words not
-    # covered by prefix/substring matching (e.g. "relaince", "hdfc bnk"). Skipped for
-    # short, single-token, all-alphabetic queries (e.g. "AAPL", "GOOGL") -- those are
-    # indistinguishable from a deliberate (and possibly unsupported, e.g. a US ticker)
-    # bare-symbol guess, and short strings score misleadingly high against equally-short
-    # candidate name tokens under fuzzy matching, e.g. "AAPL" ~ "APL Apollo Tubes" or
-    # "GOOGL" ~ "GOCL" (GOCL Corporation) at a 66/100 ratio, comfortably past the
-    # threshold below despite being an unrelated company. The cutoff is 6, not 4,
-    # because that still comfortably excludes real fuzzy-typo cases this app explicitly
-    # supports (e.g. "relaince", 8 characters) while catching short tickers like
-    # "GOOGL"/"GOOGLE"/"AMZN"/"AMAZON" that would otherwise silently resolve to the
-    # wrong Indian stock instead of correctly reporting no match.
-    looks_like_bare_ticker_guess = bare_query.isalpha() and " " not in query and len(bare_query) <= 6
-    if looks_like_bare_ticker_guess:
-        return results
-
-    seen_symbols = {r.symbol for r in results}
-    query_tokens = bare_query.split()
-    scored = universe["name_tokens"].map(lambda tokens: _best_token_match_score(query_tokens, tokens))
-    # Ties are common: a one-word typo like "relaince" scores identically against every
-    # "Reliance ___" company (Industries, Power, Home Finance, ...), since name-string
-    # similarity alone can't tell them apart. With no market-cap/prominence data in the
-    # bundled universe, membership in the app's own curated large-cap list is the best
-    # available tiebreaker -- it's what keeps "relaince" resolving to RELIANCE.NS
-    # (Reliance Industries) instead of an arbitrary same-scoring smaller company.
-    is_default = universe["symbol"].isin(DEFAULT_TICKERS)
-    fuzzy_ranked = universe.assign(match_score=scored, is_default=is_default).sort_values(
-        ["match_score", "is_default"], ascending=[False, False]
-    )
-    for row in fuzzy_ranked.itertuples(index=False):
-        if row.match_score < _FUZZY_SCORE_THRESHOLD:
-            break
-        if row.symbol in seen_symbols:
-            continue
-        results.append(UniverseEntry(symbol=row.symbol, name=row.name, series=row.series))
-        seen_symbols.add(row.symbol)
-        if len(results) >= limit:
-            break
-    return results
+    return [r.entry for r in search_stocks(query, limit=limit)]
 
 
 def resolve_symbol(user_text: str) -> str | None:

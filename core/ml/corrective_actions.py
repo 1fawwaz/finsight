@@ -23,9 +23,8 @@ import pandas as pd
 from sklearn.metrics import roc_auc_score
 
 from core.config import get_logger
-from core.ml.cv import CVFold, assert_no_chronological_leakage
 from core.ml.generalization import GateResult, evaluate_generalization
-from core.ml.training import RANDOM_STATE, TARGET_METRIC, build_model, fit_with_early_stopping
+from core.ml.training import RANDOM_STATE, build_model, fit_with_early_stopping
 
 logger = get_logger(__name__)
 

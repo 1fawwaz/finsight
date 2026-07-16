@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 
 from core.config import BENCHMARK_BANKNIFTY, BENCHMARK_NIFTY50, BENCHMARK_SENSEX, GEMINI_API_KEY, GEMINI_TIMEOUT_SECONDS, get_logger
 from core.explain import explain_fundamentals, explain_macd, explain_ml_prediction, explain_rsi, explain_sentiment, explain_support, explain_resistance
+from core.formatting import format_inr
 from core.fundamentals import get_fundamentals
 from core.indicators import macd, rsi, support_resistance, volatility
 from core.market_status import get_nse_market_status, prediction_target_session
@@ -525,11 +526,11 @@ def _fallback_single_stock(symbol_display: str, data: dict, mode: str) -> str:
     if change is not None:
         change_word = "up" if change >= 0 else "down"
         lines.append(
-            f"**{symbol_display}** is at ₹{data['last_close']:,.2f}, {change_word} {abs(change):.1%} "
+            f"**{symbol_display}** is at {format_inr(data['last_close'])}, {change_word} {abs(change):.1%} "
             f"today (last updated {data.get('last_updated', 'recently')})."
         )
     else:
-        lines.append(f"**{symbol_display}** is at ₹{data['last_close']:,.2f} (last updated {data.get('last_updated', 'recently')}).")
+        lines.append(f"**{symbol_display}** is at {format_inr(data['last_close'])} (last updated {data.get('last_updated', 'recently')}).")
 
     tech_bits = []
     if data.get("rsi_14") is not None:
@@ -651,7 +652,7 @@ def _fallback_sector(context: dict, mode: str) -> str:
         )
     lines = [f"Here's what FinSight already tracks in {sector} -- this is informational, not a ranking of which is \"best\":"]
     for c in candidates:
-        bits = [f"₹{c['last_close']:,.2f}"]
+        bits = [format_inr(c['last_close'])]
         if c.get("1m_change_pct") is not None:
             bits.append(f"{c['1m_change_pct']:+.1%} over 1M")
         if c.get("rsi_14") is not None:

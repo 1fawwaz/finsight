@@ -1,0 +1,3 @@
+{
+  "method_used": "Monkey-patched websocket.WebSocket.send / websocket.WebSocket.recv_data_frame (the underlying websocket-client library's core send/receive, called by neo_api_client's StartServer before its own HSWrapper binary parsing), plus websocket.WebSocketApp.__init__ to wrap on_open/on_message/on_error/on_close so the real close_status_code/close_msg (which neo_api_client's own StartServer.on_close discards -- confirmed by reading its source) are captured."
+}

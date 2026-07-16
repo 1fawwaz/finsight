@@ -2,10 +2,12 @@
 
 import streamlit as st
 
-from core.ui_components import render_mode_toggle
+from core.design import inject_design_system
+from core.ui_components import render_mode_toggle, render_page_header
 
 st.set_page_config(page_title="FinSight | About", page_icon="\U0001F4C8", layout="wide")
-st.title("About FinSight")
+inject_design_system()
+render_page_header("About FinSight")
 
 render_mode_toggle()
 

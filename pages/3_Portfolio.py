@@ -9,13 +9,18 @@ import streamlit as st
 from core import theme
 from core.config import BENCHMARKS, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
+from core.database import init_db
+from core.design import inject_design_system
 from core.explain import explain_diversification, explain_drawdown, explain_risk_level, explain_sharpe
 from core.formatting import format_inr
 from core.portfolio import (
     add_holding,
+    aggregate_shares_by_symbol,
     correlation_matrix,
     create_portfolio,
     delete_holding,
+    delete_portfolio,
+    DuplicatePortfolioNameError,
     diversification_score,
     list_holdings,
     list_portfolios,
@@ -27,16 +32,28 @@ from core.portfolio import (
     risk_level,
     sector_allocation,
     sharpe_ratio,
+    update_holding,
 )
 from core.queries import get_multi_symbol_close, get_price_history, get_ticker_info
-from core.ui_components import display_symbol, render_ai_panel, render_explanation, render_mode_toggle, stock_search_and_pick
+from core.ui_components import (
+    display_symbol,
+    render_ai_panel,
+    render_empty_state,
+    render_explanation,
+    render_mode_toggle,
+    render_page_header,
+    reset_stock_search,
+    stock_search_and_pick,
+)
 from core.universe import resolve_symbol
 
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="FinSight | Portfolio", page_icon="\U0001F4C8", layout="wide")
-st.title("Portfolio")
+inject_design_system()
+render_page_header("Portfolio", "Track holdings, allocation, and risk across your own portfolios.")
 
+init_db()
 mode = render_mode_toggle()
 
 
@@ -79,34 +96,55 @@ with col_create:
     with st.form("create_portfolio_form", clear_on_submit=True):
         new_portfolio_name = st.text_input("Or create a new portfolio", placeholder="e.g. Core Holdings")
         if st.form_submit_button("Create Portfolio") and new_portfolio_name.strip():
-            create_portfolio(new_portfolio_name.strip())
-            st.session_state.selected_portfolio = new_portfolio_name.strip()
-            st.rerun()
+            try:
+                create_portfolio(new_portfolio_name.strip())
+                st.session_state.selected_portfolio = new_portfolio_name.strip()
+                st.rerun()
+            except DuplicatePortfolioNameError as exc:
+                st.error(str(exc))
 
 if selected_name == "<none>":
-    st.info("Create or select a portfolio to get started.")
+    render_empty_state("No portfolio selected", "Create or select a portfolio above to get started.", icon="\U0001F4BC")
     st.stop()
 
 portfolio_id = portfolio_names[selected_name]
+
+with st.expander("Delete this portfolio"):
+    st.warning(
+        f"This will permanently delete **{selected_name}**, all its holdings, and its "
+        "statistics. This action cannot be undone."
+    )
+    confirm_delete = st.checkbox(f"I understand — permanently delete '{selected_name}'", key="confirm_delete_portfolio")
+    if st.button("Delete Portfolio", disabled=not confirm_delete, type="primary"):
+        delete_portfolio(portfolio_id)
+        st.session_state.selected_portfolio = "<none>"
+        st.session_state.pop("confirm_delete_portfolio", None)
+        st.success(f"Deleted '{selected_name}'.")
+        st.rerun()
 
 st.divider()
 st.subheader("Holdings")
 
 match = stock_search_and_pick("add_holding", label="Search for a stock to add")
-form_cols = st.columns([1, 1, 1])
+form_cols = st.columns([1, 1, 1], vertical_alignment="bottom")
 shares_input = form_cols[0].number_input("Shares", min_value=0.0, step=1.0, key="add_holding_shares")
 cost_input = form_cols[1].number_input("Avg cost (₹)", min_value=0.0, step=0.01, key="add_holding_cost")
-form_cols[2].write("")
-form_cols[2].write("")
 add_clicked = form_cols[2].button(f"Add {display_symbol(match.symbol)}" if match else "Add Holding", disabled=match is None)
 if add_clicked and match is not None:
     if shares_input <= 0:
-        st.warning("Enter a positive share count.")
+        st.error("Enter a positive share count before adding this holding.")
+    elif cost_input < 0:
+        st.error("Average cost can't be negative.")
     elif _ensure_ingested(match.symbol):
-        add_holding(portfolio_id, match.symbol, shares_input, cost_input)
-        for widget_key in ("add_holding_query", "add_holding_choice", "add_holding_shares", "add_holding_cost"):
-            st.session_state.pop(widget_key, None)
-        st.rerun()
+        try:
+            add_holding(portfolio_id, match.symbol, shares_input, cost_input)
+            reset_stock_search("add_holding")
+            st.session_state.pop("add_holding_shares", None)
+            st.session_state.pop("add_holding_cost", None)
+            st.rerun()
+        except Exception as exc:
+            logger.error("Failed to add holding %s to portfolio %s: %s", match.symbol, portfolio_id, exc)
+            st.error(f"Couldn't save this holding: {exc}")
 
 with st.expander("Import holdings from CSV"):
     st.caption("Columns: Symbol, Shares, Avg Cost (Avg Cost is optional; Symbol accepts a company name, bare ticker, or full .NS/.BO symbol).")
@@ -151,7 +189,7 @@ with st.expander("Import holdings from CSV"):
 holdings = list_holdings(portfolio_id)
 
 if not holdings:
-    st.info("No holdings yet. Add one above.")
+    render_empty_state("No holdings yet", "Search for a stock above and add it to this portfolio.", icon="\U0001F4C8")
     st.stop()
 
 current_prices: dict[str, float] = {}
@@ -197,18 +235,58 @@ st.download_button(
     mime="text/csv",
 )
 
-delete_choice = st.selectbox("Remove a holding", options=["<none>"] + [f"{r['Symbol']} (id {r['id']})" for r in holdings_rows])
-if delete_choice != "<none>" and st.button("Delete Holding"):
-    holding_id = int(delete_choice.split("id ")[1].rstrip(")"))
-    delete_holding(holding_id)
-    st.rerun()
+edit_col, delete_col = st.columns(2)
+# Not a universe search: both pick from this portfolio's own already-loaded holdings
+# to act on one, the same "already-owned small set" exception as Market Overview's
+# watchlist-removal picker -- not a stock-discovery input.
+holding_labels = ["<none>"] + [f"{r['Symbol']} (id {r['id']})" for r in holdings_rows]
+holdings_by_label = {f"{r['Symbol']} (id {r['id']})": r for r in holdings_rows}
+
+with edit_col:
+    edit_choice = st.selectbox("Edit a holding", options=holding_labels, key="edit_holding_choice")
+    if edit_choice != "<none>":
+        current_row = holdings_by_label[edit_choice]
+        new_shares = st.number_input(
+            "New shares", min_value=0.0, step=1.0, value=float(current_row["Shares"]), key="edit_holding_shares"
+        )
+        new_cost = st.number_input(
+            "New avg cost (₹)", min_value=0.0, step=0.01, value=float(current_row["Avg Cost"]), key="edit_holding_cost"
+        )
+        if st.button("Update Holding"):
+            if new_shares <= 0:
+                st.error("Enter a positive share count before updating this holding.")
+            else:
+                try:
+                    if update_holding(current_row["id"], new_shares, new_cost):
+                        st.success(f"Updated {current_row['Symbol']}.")
+                        st.rerun()
+                    else:
+                        st.error("That holding no longer exists -- it may have just been deleted elsewhere.")
+                except Exception as exc:
+                    logger.error("Failed to update holding %s: %s", current_row["id"], exc)
+                    st.error(f"Couldn't update this holding: {exc}")
+
+with delete_col:
+    delete_choice = st.selectbox("Remove a holding", options=holding_labels, key="delete_holding_choice")
+    if delete_choice != "<none>" and st.button("Delete Holding"):
+        holding_id = int(delete_choice.split("id ")[1].rstrip(")"))
+        try:
+            delete_holding(holding_id)
+            st.rerun()
+        except Exception as exc:
+            logger.error("Failed to delete holding %s: %s", holding_id, exc)
+            st.error(f"Couldn't delete this holding: {exc}")
 
 valid_symbols = [h["symbol"] for h in holdings if h["symbol"] in current_prices]
 if not valid_symbols:
     st.warning("No price data available for the current holdings.")
     st.stop()
 
-shares_map = {h["symbol"]: h["shares"] for h in holdings if h["symbol"] in current_prices}
+# Aggregated (summed) per symbol, not a plain {symbol: shares} dict comprehension --
+# a symbol held via more than one lot (two separate Add actions) must contribute all
+# of its shares to portfolio-level totals, not just the last lot read. See
+# core.portfolio.aggregate_shares_by_symbol's docstring for the confirmed bug this fixes.
+shares_map = aggregate_shares_by_symbol([h for h in holdings if h["symbol"] in current_prices])
 weights = portfolio_weights(shares_map, current_prices)
 total_portfolio_value = sum(shares_map[s] * current_prices[s] for s in shares_map)
 

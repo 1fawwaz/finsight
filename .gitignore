@@ -10,3 +10,5 @@ htmlcov/
 .streamlit/secrets.toml
 streamlit_log.txt
 catboost_info/
+node_modules/
+kotak_verification_output/

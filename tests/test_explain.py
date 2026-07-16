@@ -220,6 +220,26 @@ def test_explain_ml_prediction_down_direction():
     assert "down" in result.simple.lower()
 
 
+def test_explain_ml_prediction_include_probability_false_omits_the_percentage():
+    # Regression check for the Chances/Probability feature removal on ML Signals:
+    # explicitly requesting include_probability=False must never state the raw
+    # probability value, while the default (True, used by "Ask FinSight AI") is
+    # unaffected -- see test_explain_ml_prediction_mentions_direction_and_uncertainty.
+    result = explain_ml_prediction(predicted_up=True, probability=0.56, historical_accuracy=0.53, include_probability=False)
+    assert "56" not in result.professional
+    assert "0.56" not in result.professional
+    assert "probability" not in result.professional.lower()
+    assert "up" in result.professional.lower()
+    assert "53" in result.professional or "0.53" in result.professional  # accuracy framing stays
+
+
+def test_explain_ml_prediction_default_still_includes_probability():
+    # The default (used by core.chat's Ask FinSight AI) must remain byte-for-byte
+    # unaffected by the ML-Signals-only include_probability=False call site.
+    result = explain_ml_prediction(predicted_up=True, probability=0.56, historical_accuracy=0.53)
+    assert "56" in result.professional or "0.56" in result.professional
+
+
 def test_all_none_inputs_never_raise():
     for fn, args in [
         (explain_rsi, (None,)),

@@ -1,0 +1,15 @@
+{
+  "rest_quote_before_ws": {
+    "response": [
+      {
+        "exchange_token": "2885",
+        "display_symbol": "RELIANCE-EQ",
+        "exchange": "nse_cm",
+        "ltp": "1296.6000"
+      }
+    ],
+    "captured_at": "2026-07-16T11:16:16.575584+00:00"
+  },
+  "equity_frames_received": 6,
+  "conclusion": "REST quotes returned data (see quotes_results.json) while the websocket produced 6 raw inbound frame(s) total -- see raw_frames.jsonl."
+}

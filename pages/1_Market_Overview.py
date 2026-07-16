@@ -6,19 +6,28 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core import theme
-from core.data_ingestion import IngestionError, ingest_ticker
+from core.data_ingestion import IngestionError
 from core.database import init_db
+from core.design import inject_design_system
 from core.indicators import rsi
 from core.market_status import get_nse_market_status
 from core.queries import get_price_history, get_ticker_info
-from core.ui_components import display_symbol, render_mode_toggle, stock_search_and_pick
+from core.ui_components import (
+    display_symbol,
+    render_empty_state,
+    render_live_market_data_panel,
+    render_mode_toggle,
+    render_page_header,
+    stock_search_and_pick,
+)
 from core.watchlist import add_to_watchlist, list_watchlist, remove_from_watchlist, seed_default_watchlist_if_empty
 from core.config import get_logger
 
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="FinSight | Market Overview", page_icon="\U0001F4C8", layout="wide")
-st.title("Market Overview")
+inject_design_system()
+render_page_header("Market Overview", "Your watchlist, sector heatmap, top movers, and volume leaders.")
 
 init_db()
 seed_default_watchlist_if_empty()
@@ -82,11 +91,16 @@ with col_add:
 
 with col_remove:
     if watchlist_symbols:
+        # Not a universe search: picks from the small set the user already owns, to
+        # remove one -- same "already-loaded owned set" exception as the name/symbol
+        # filter below, not a stock-discovery input the autocomplete migration covers.
         to_remove = st.selectbox("Remove a stock", options=[""] + watchlist_symbols, format_func=lambda s: display_symbol(s) if s else "")
         if to_remove and st.button("Remove"):
             remove_from_watchlist(to_remove)
             st.rerun()
 
+st.divider()
+render_live_market_data_panel(watchlist_symbols)
 st.divider()
 
 TRADING_DAYS_52W = 252
@@ -117,7 +131,7 @@ for symbol in watchlist_symbols:
     )
 
 if not rows:
-    st.warning("No data available for the current watchlist yet.")
+    render_empty_state("No data available yet", "Add a stock above to see it here once its price history loads.", icon="\U0001F4CA")
 else:
     table_df = pd.DataFrame(rows)
 
@@ -133,6 +147,12 @@ else:
     if sector_filter:
         filtered_df = filtered_df[filtered_df["Sector"].isin(sector_filter)]
     if name_filter.strip():
+        # Intentionally NOT routed through core.search_engine.search_stocks: this
+        # filters the watchlist table already rendered above (by its own computed
+        # columns -- Price, RSI, 52W range -- which the search engine has no notion
+        # of), rather than searching/ranking candidates from the full stock universe
+        # to find a new stock to add. A plain substring filter over an already-loaded,
+        # small, user-owned table is a different operation from universe search.
         needle = name_filter.strip().lower()
         filtered_df = filtered_df[
             filtered_df["Symbol"].str.lower().str.contains(needle) | filtered_df["Name"].str.lower().str.contains(needle)

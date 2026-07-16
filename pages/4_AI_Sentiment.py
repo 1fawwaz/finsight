@@ -7,15 +7,17 @@ import streamlit as st
 from core import theme
 from core.config import DEFAULT_TICKERS, GEMINI_API_KEY, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
+from core.design import inject_design_system
 from core.explain import explain_sentiment
 from core.queries import get_price_history
 from core.sentiment import analyze_ticker_sentiment, get_stored_sentiment
-from core.ui_components import display_symbol, render_ai_panel, render_explanation, render_mode_toggle, stock_picker
+from core.ui_components import display_symbol, render_ai_panel, render_empty_state, render_explanation, render_mode_toggle, render_page_header, stock_picker
 
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="FinSight | AI Sentiment", page_icon="\U0001F4C8", layout="wide")
-st.title("AI Sentiment")
+inject_design_system()
+render_page_header("AI Sentiment", "News sentiment scoring per ticker, powered by Gemini with a rule-based fallback.")
 
 mode = render_mode_toggle()
 
@@ -31,7 +33,7 @@ def _load_history(symbol: str) -> pd.DataFrame:
     return get_price_history(symbol)
 
 
-col_symbol, col_action = st.columns([2, 1])
+col_symbol, col_action = st.columns([2, 1], vertical_alignment="bottom")
 with col_symbol:
     symbol = stock_picker("sentiment_symbol", default_symbol=DEFAULT_TICKERS[0])
 
@@ -45,8 +47,6 @@ if _load_history(symbol).empty:
             st.stop()
 
 with col_action:
-    st.write("")
-    st.write("")
     if st.button("Analyze Sentiment", use_container_width=True):
         with st.spinner(f"Fetching and scoring recent news for {display_symbol(symbol)}..."):
             new_rows = analyze_ticker_sentiment(symbol)
@@ -60,9 +60,11 @@ st.divider()
 stored = get_stored_sentiment(symbol)
 
 if not stored:
-    st.caption(
-        "No sentiment data yet for this ticker. Click **Analyze Sentiment** to fetch and score recent news. "
-        "Coverage for smaller or less-followed Indian tickers can be sparse — that's expected, not an error."
+    render_empty_state(
+        "No sentiment data yet",
+        "Click \"Analyze Sentiment\" above to fetch and score recent news. Coverage for smaller "
+        "or less-followed Indian tickers can be sparse — that's expected, not an error.",
+        icon="\U0001F4F0",
     )
 else:
     sentiment_df = pd.DataFrame(stored).sort_values("date")

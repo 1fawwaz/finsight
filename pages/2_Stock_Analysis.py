@@ -8,6 +8,7 @@ import streamlit as st
 from core import theme
 from core.config import DEFAULT_TICKERS, get_logger
 from core.data_ingestion import IngestionError, ingest_ticker
+from core.design import inject_design_system
 from core.explain import (
     explain_adx,
     explain_atr,
@@ -22,12 +23,13 @@ from core.explain import (
 from core.formatting import format_inr
 from core.indicators import adx, atr, bollinger_bands, ema, macd, rsi, sma, support_resistance, volatility, vwap
 from core.queries import get_price_history
-from core.ui_components import display_symbol, render_ai_panel, render_explanation, render_mode_toggle, stock_picker
+from core.ui_components import display_symbol, render_ai_panel, render_explanation, render_mode_toggle, render_page_header, stock_picker
 
 logger = get_logger(__name__)
 
 st.set_page_config(page_title="FinSight | Stock Analysis", page_icon="\U0001F4C8", layout="wide")
-st.title("Stock Analysis")
+inject_design_system()
+render_page_header("Stock Analysis", "Candlestick charting, indicator overlays, and key technical stats.")
 
 mode = render_mode_toggle()
 
